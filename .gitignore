@@ -1,0 +1,215 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Build outputs
+dist/
+build/
+out/
+.vite/
+.next/
+.nuxt/
+.output/
+.vercel/
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.*.local
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+*.lcov
+.nyc_output
+
+# ESLint cache
+.eslintcache
+
+# Prettier cache
+.prettiercache
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Optional npm cache directory
+.npm
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# parcel-bundler cache (https://parceljs.org/)
+.cache
+.parcel-cache
+
+# Stores VSCode versions used for testing VSCode extensions
+.vscode-test
+
+# yarn v2
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Logs
+logs
+*.log
+
+# Runtime configuration
+.npmrc
+
+# Testing
+/coverage
+/cypress/screenshots
+/cypress/videos
+
+# Storybook build outputs
+.out
+.storybook-out
+storybook-static
+
+# Local development
+.local
+
+# Mock data and fixtures
+__mocks__/
+fixtures/
+
+# Generated files
+*.generated.*
+
+# Lock files (uncomment if you want to ignore them)
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+
+# Local uploads and user content (for development)
+uploads/
+files/
+assets/temp/
+
+# API keys and secrets
+.secrets
+secrets.json
+
+# Docker
+.dockerignore
+
+# Backup files
+*.backup
+*.bak
+
+# Windows specific
+*.lnk
+
+# macOS specific
+.AppleDouble
+.LSOverride
+Icon?
+
+# Linux specific
+*~
+
+# JetBrains IDEs
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# Vim
+*.swp
+*.swo
+.vimrc.local
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# Project specific
+# 用户上传的头像文件
+public/avatars/
+public/uploads/
+# 处理结果缓存
+public/cache/
+# 临时文件
+public/temp/
+# 生成的头像框
+public/frames/custom/
+# AI处理结果
+public/results/
+
+# Development tools
+.history/
+.vscode/settings.json
+.vscode/launch.json
+.vscode/extensions.json
+
+# Package manager logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor directories and files
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Miscellaneous
+*.tgz
+*.tar.gz
+.cache/
