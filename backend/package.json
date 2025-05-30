@@ -1,0 +1,27 @@
+{
+  "name": "weframe-backend",
+  "version": "1.0.0",
+  "description": "微信头像智能处理系统后端",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "multer": "^1.4.5-lts.1",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "dotenv": "^16.3.1",
+    "mongoose": "^7.6.3",
+    "redis": "^4.6.10",
+    "sharp": "^0.32.6",
+    "bull": "^4.11.3",
+    "uuid": "^9.0.1",
+    "morgan": "^1.10.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+} 
