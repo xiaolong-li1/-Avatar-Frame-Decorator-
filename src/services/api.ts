@@ -1,135 +1,179 @@
 import { message } from 'antd'
 import { API_CONFIG, API_ENDPOINTS, ApiResponse, UploadResponse, TaskStatus, Frame, ArtStyle, Effect } from '../config/api'
-
-// 创建基础的fetch封装
+// 基于 Fetch 的封装类
 class ApiService {
-  private baseURL: string
-  private timeout: number
+  private baseURL: string;
+  private timeout: number;
 
   constructor() {
-    this.baseURL = API_CONFIG.BASE_URL
-    this.timeout = API_CONFIG.TIMEOUT
+    this.baseURL = API_CONFIG.BASE_URL;
+    this.timeout = API_CONFIG.TIMEOUT;
   }
 
-  // 基础请求方法
-  private async request<T>(
-    endpoint: string, 
-    options: RequestInit = {}
-  ): Promise<ApiResponse<T>> {
-    const url = `${this.baseURL}${endpoint}`
-    
-    // 设置默认headers
-    const defaultHeaders: Record<string, string> = {
-      'Content-Type': 'application/json',
-    }
+  // 核心请求方法：会读取 response.json() 并抛出带后端 error 字段的错误
+private async request<T>(
+  endpoint: string,
+  options: RequestInit = {}
+): Promise<ApiResponse<T>> {
+  const url = `${this.baseURL}${endpoint}`;
 
-    // 获取token (如果有登录功能)
-    const token = localStorage.getItem('token')
-    if (token) {
-      defaultHeaders['Authorization'] = `Bearer ${token}`
-    }
+  // 默认 headers
+  const defaultHeaders: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
 
-    const config: RequestInit = {
-      ...options,
-      headers: {
-        ...defaultHeaders,
-        ...options.headers,
-      },
-    }
+  // 如果有 token，就附加在 headers 中
+  const token = localStorage.getItem('token');
+  if (token) {
+    defaultHeaders['Authorization'] = `Bearer ${token}`;
+  }
 
+  const config: RequestInit = {
+    ...options,
+    headers: {
+      ...defaultHeaders,
+      ...options.headers,
+    },
+  };
+
+  try {
+    // 使用 AbortController 实现超时功能
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+    const response = await fetch(url, {
+      ...config,
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    // 先尝试将 response 解析为 JSON（可能在 error 情况时也有 JSON body）
+    let data: any = null;
     try {
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), this.timeout)
-
-      const response = await fetch(url, {
-        ...config,
-        signal: controller.signal,
-      })
-
-      clearTimeout(timeoutId)
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-
-      const data = await response.json()
-      return data
-    } catch (error) {
-      console.error('API请求失败:', error)
-      throw error
+      data = await response.json();
+    } catch {
+      // 如果无法解析 JSON，则 data 保持 null
     }
-  }
 
-  // GET请求
+    if (!response.ok) {
+      // 如果后端返回了 { error: 'xxx' } 或 {message: 'xxx'}，优先使用它们
+      const serverMsg = data?.error || data?.message;
+      console.log("🚩 进入 if (!response.ok)，后端返回的 data:", data);
+      console.log("🚩 serverMsg:", serverMsg);
+      throw new Error(serverMsg || `HTTP error! status: ${response.status}`);
+    }
+
+    // 如果是 204 No Content，可以直接返回空 object
+    if (response.status === 204) {
+      return {} as ApiResponse<T>;
+    }
+
+    // 返回解析后的 JSON
+    return data as ApiResponse<T>;
+  } catch (err: any) {
+    // 对于网络超时、解析错误等也一并捕获
+    console.error("❌ API请求失败，捕获到 err:", err);
+    throw err;
+  }
+}
+
+  // GET 请求
   async get<T>(endpoint: string): Promise<ApiResponse<T>> {
-    return this.request<T>(endpoint, { method: 'GET' })
+    return this.request<T>(endpoint, { method: 'GET' });
   }
 
-  // POST请求
+  // POST 请求
   async post<T>(endpoint: string, data?: any): Promise<ApiResponse<T>> {
     return this.request<T>(endpoint, {
       method: 'POST',
       body: data ? JSON.stringify(data) : undefined,
-    })
+    });
   }
 
-  // PUT请求
+  // PUT 请求
   async put<T>(endpoint: string, data?: any): Promise<ApiResponse<T>> {
     return this.request<T>(endpoint, {
       method: 'PUT',
       body: data ? JSON.stringify(data) : undefined,
-    })
+    });
   }
 
-  // DELETE请求
+  // DELETE 请求
   async delete<T>(endpoint: string): Promise<ApiResponse<T>> {
-    return this.request<T>(endpoint, { method: 'DELETE' })
+    return this.request<T>(endpoint, { method: 'DELETE' });
   }
 
-  // 文件上传
+  // 文件上传（保持原有逻辑）
   async uploadFile(endpoint: string, file: File, additionalData?: Record<string, string>): Promise<ApiResponse<UploadResponse>> {
-    const formData = new FormData()
-    formData.append('file', file)
-    
+    const formData = new FormData();
+    formData.append('file', file);
     if (additionalData) {
       Object.entries(additionalData).forEach(([key, value]) => {
-        formData.append(key, value)
-      })
+        formData.append(key, value);
+      });
     }
 
-    const token = localStorage.getItem('token')
-    const headers: Record<string, string> = {}
+    const token = localStorage.getItem('token');
+    const headers: Record<string, string> = {};
     if (token) {
-      headers['Authorization'] = `Bearer ${token}`
+      headers['Authorization'] = `Bearer ${token}`;
     }
+
+    const url = `${this.baseURL}${endpoint}`;
+    console.log('Uploading file to:', url);
+    console.log('Headers:', headers);
+    console.log('Additional Data:', additionalData);
 
     try {
-      const response = await fetch(`${this.baseURL}${endpoint}`, {
+      const response = await fetch(url, {
         method: 'POST',
         headers,
         body: formData,
-      })
+      });
 
+      console.log('Response status:', response.status);
       if (!response.ok) {
-        throw new Error(`Upload failed! status: ${response.status}`)
+        const errorText = await response.text();
+        throw new Error(`Upload failed! status: ${response.status}, details: ${errorText}`);
       }
 
-      return await response.json()
+      const data = await response.json();
+      console.log('Response data:', data);
+      return data;
     } catch (error) {
-      console.error('文件上传失败:', error)
-      throw error
+      console.error('文件上传失败:', error);
+      throw error;
     }
   }
 }
+
 
 // 创建API服务实例
 const apiService = new ApiService()
 
 // 具体的API调用方法
 export const api = {
+    // 用户注册
+  register: (username: string, password: string) => {
+    const url = API_ENDPOINTS.AUTH.REGISTER;
+    const body = { username, password };
+    message.info(`POST ${url} \nRequest Body: ${JSON.stringify(body)}`);
+    return apiService.post<{ token: string; user: { id: string; username: string } }>(url, body);
+  },
+
+  login: (username: string, password: string) => {
+    const url = API_ENDPOINTS.AUTH.LOGIN;
+    const body = { username, password };
+    message.info(`POST ${url} \nRequest Body: ${JSON.stringify(body)}`);
+    return apiService.post<{ token: string; user: { id: string; username: string } }>(url, body);
+  },
+
   // 文件上传
-  uploadAvatar: (file: File) => 
-    apiService.uploadFile(API_ENDPOINTS.UPLOAD.AVATAR, file, { type: 'avatar' }),
+  uploadAvatar: (file: File) => {
+    console.log('Uploading avatar:', file.name); // 打印上传的文件名
+    return apiService.uploadFile(API_ENDPOINTS.UPLOAD.AVATAR, file, { type: 'avatar' });
+  },
 
   uploadFrame: (file: File, name: string, description?: string) => 
     apiService.uploadFile(API_ENDPOINTS.FRAMES.CUSTOM_UPLOAD, file, { 
@@ -144,6 +188,8 @@ export const api = {
       limit: limit.toString(),
       ...(category && category !== 'all' && { category })
     })
+    const url = `${API_ENDPOINTS.FRAMES.PRESET_LIST}?${params.toString()}`;
+    message.info(`请求 URL: ${url}`);
     return apiService.get<{ frames: Frame[], total: number, page: number, limit: number }>(
       `${API_ENDPOINTS.FRAMES.PRESET_LIST}?${params}`
     )
@@ -169,12 +215,13 @@ export const api = {
   deleteCustomFrame: (frameId: string) => 
     apiService.delete(API_ENDPOINTS.FRAMES.CUSTOM_DELETE(frameId)),
 
-  // AI处理功能
-  superResolution: (avatarFileId: string, scaleFactor: number, quality: string) => 
-    apiService.post<{ taskId: string, status: string, estimatedTime: number }>(
+  // AI处理功能 - 头像超分
+  superResolution: (avatarFileId: string, scaleFactor: number, quality: string) =>
+    apiService.post<{ resultUrl: string }>(
       API_ENDPOINTS.AI.SUPER_RESOLUTION,
       { avatarFileId, scaleFactor, quality }
     ),
+
 
   getArtStyles: () => 
     apiService.get<{ styles: ArtStyle[] }>(API_ENDPOINTS.AI.STYLES_LIST),
@@ -247,11 +294,13 @@ export const api = {
       { taskId, format, quality, size }
     ),
 
-  createShare: (resultFileId: string, shareType = 'wechat', options = {}) => 
-    apiService.post<{ shareId: string, shareUrl: string, qrCodeUrl: string, expiresAt: string }>(
+  createShare: (resultFileId: string, shareType = 'wechat', options: Record<string, any> = {}) => {
+    console.log(`resultFileId: ${resultFileId}, shareType: ${shareType}, options: ${JSON.stringify(options)}`);
+    return apiService.post<{ shareId: string; shareUrl: string; qrCodeUrl: string; expiresAt: string }>(
       API_ENDPOINTS.SHARE.CREATE,
       { resultFileId, shareType, options }
-    ),
+    );
+  },
 
   // 系统状态
   getSystemStatus: () => 
