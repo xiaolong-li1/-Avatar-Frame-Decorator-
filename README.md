@@ -1,4 +1,4 @@
-# WeFrame - 微信头像智能处理系统
+# WeFrame - 微信头像智能处理系统(前端文档)
 
 一个基于React + TypeScript + Ant Design开发的微信头像智能处理系统，提供多种AI图像处理功能，让您的社交形象更加个性化和专业。
 
@@ -208,7 +208,7 @@ MIT License
 
 - 项目作者：WeFrame Team
 - 邮箱：contact@weframe.com
-- 项目地址：https://github.com/weframe/weframe-frontend
+- 项目地址：https://github.com/xiaolong-li1/-Avatar-Frame-Decorator-
 
 ---
 
