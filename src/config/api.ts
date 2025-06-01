@@ -1,7 +1,7 @@
 // API配置文件
 export const API_CONFIG = {
   // 基础配置
-  BASE_URL: (import.meta as any).env?.VITE_API_BASE_URL || 'https://api.weframe.com/v1',
+  BASE_URL: 'http://localhost:3000',
   TIMEOUT: 30000, // 30秒超时
   
   // 文件上传配置
@@ -18,6 +18,7 @@ export const API_ENDPOINTS = {
   AUTH: {
     LOGIN: '/auth/login',
     LOGOUT: '/auth/logout',
+    REGISTER: '/auth/register',
     REFRESH: '/auth/refresh',
   },
 
