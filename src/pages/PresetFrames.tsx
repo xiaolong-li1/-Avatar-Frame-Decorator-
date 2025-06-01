@@ -84,88 +84,194 @@ const PresetFrames: React.FC = () => {
     }
   };
 
-const applyFrame = async (frame: FrameTemplate) => {
-  if (!userAvatar || !userAvatar.fileId) {
-    message.warning('请先上传头像图片');
-    return;
-  }
-  if (!frame.id) {
-    message.warning('请选择一个头像框');
-    return;
-  }
-  console.log('userAvatar.fileId:', userAvatar.fileId);
-  console.log('frame.id:', frame.id);
-  message.info('Applying frame:');
-  setIsProcessing(true);
-  try {
-    const response = await api.applyFrame(userAvatar.fileId, frame.id);
-    if (response.data.status === 'completed') {
-      setAppliedResult({ resultUrl: response.data.resultUrl });
-      message.success('头像框应用成功！');
-    } else {
-      const finalStatus = await pollTaskStatus(response.data.taskId);
-      if (finalStatus.status === 'completed') {
-        setAppliedResult({ resultUrl: finalStatus.resultUrl });
-        message.success('头像框应用成功！');
-      } else {
-        throw new Error(finalStatus.error || '应用失败');
-      }
+  // 修改 applyFrame 函数，添加更完善的处理
+  const applyFrame = async (frame: FrameTemplate) => {
+    if (!userAvatar || !userAvatar.fileId) {
+      message.warning('请先上传头像图片');
+      return;
     }
-  } catch (error) {
-    message.error('头像框应用失败，请稍后重试');
-  } finally {
-    setIsProcessing(false);
-  }
-};
+    if (!frame.id) {
+      message.warning('请选择一个头像框');
+      return;
+    }
 
-const handleDownload = async () => {
-  if (!appliedResult || !appliedResult.resultUrl) {
-    message.warning('请先应用头像框');
-    return;
-  }
+    setIsProcessing(true); // 显示处理中状态
 
-  try {
-    const response = await fetch(appliedResult.resultUrl);
-    const blob = await response.blob();
+    try {
+      // 添加调试信息
+      console.log('应用头像框 - 参数:', {
+        avatarFileId: userAvatar.fileId,
+        frameId: frame.id
+      });
 
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'avatar-with-frame.png';
+      // 超时处理
+      const timeout = setTimeout(() => {
+        if (isProcessing) { // 如果还在处理中
+          setIsProcessing(false);
+          message.error('应用头像框超时，请重试');
+        }
+      }, 30000); // 30秒超时
 
-    document.body.appendChild(link); // 兼容性
-    link.click();
-    document.body.removeChild(link);
+      // 调用API应用头像框
+      const response = await api.applyFrame(userAvatar.fileId, frame.id);
+      
+      console.log('应用头像框 - 响应:', response);
+      
+      clearTimeout(timeout); // 清除超时
 
-    window.URL.revokeObjectURL(url); // 释放内存
+      // 处理响应
+      if (response.success && response.data) {
+        // 直接使用结果URL或等待处理完成
+        if (response.data.resultUrl) {
+          // 直接返回了结果URL - 立即显示
+          setAppliedResult({ resultUrl: response.data.resultUrl });
+          setIsProcessing(false); // 添加这行关键代码
+          message.success('头像框应用成功！');
+        } else if (response.data.taskId) {
+          // 返回的是任务ID - 需要轮询任务状态
+          message.info('图片处理中，请稍候...');
+          
+          // 实现轮询逻辑
+          const taskId = response.data.taskId;
+          let pollCount = 0;
+          
+          const checkTaskStatus = async () => {
+            if (pollCount > 30) { // 最多轮询30次
+              setIsProcessing(false);
+              message.error('处理超时，请重试');
+              return;
+            }
 
-    message.success('头像下载成功！');
-  } catch (err) {
-    console.error('下载失败:', err);
-    message.error('下载失败，请重试');
-  }
-};
+            try {
+              console.log(`轮询任务状态 #${pollCount} - 任务ID: ${taskId}`);
+              const statusRes = await api.getTaskStatus(taskId);
+              
+              if (statusRes.success && statusRes.data) {
+                console.log(`任务状态: ${statusRes.data.status}`);
+                
+                if (statusRes.data.status === 'completed' && statusRes.data.resultUrl) {
+                  // 任务完成，显示结果
+                  setAppliedResult({ resultUrl: statusRes.data.resultUrl });
+                  setIsProcessing(false);
+                  message.success('头像框应用成功！');
+                } else if (statusRes.data.status === 'failed') {
+                  // 任务失败
+                  setIsProcessing(false);
+                  message.error(`处理失败: ${statusRes.data.error || '未知错误'}`);
+                } else if (statusRes.data.status === 'processing') {
+                  // 任务仍在处理中，继续轮询
+                  pollCount++;
+                  setTimeout(checkTaskStatus, 1000); // 每秒轮询一次
+                } else {
+                  // 未知状态
+                  pollCount++;
+                  setTimeout(checkTaskStatus, 1000);
+                }
+              } else {
+                // API 调用失败
+                throw new Error(statusRes.message || '获取任务状态失败');
+              }
+            } catch (err) {
+              console.error('轮询任务状态失败:', err);
+              setIsProcessing(false);
+              message.error('获取处理状态失败，请重试');
+            }
+          };
+          
+          // 开始轮询
+          checkTaskStatus();
+        } else {
+          // 既没有 resultUrl 也没有 taskId，抛出错误
+          throw new Error('服务器响应缺少必要数据');
+        }
+      } else {
+        throw new Error(response.message || '应用头像框失败');
+      }
+    } catch (error) {
+      console.error('应用头像框出错:', error);
+      message.error('头像框应用失败，请稍后重试');
+      setIsProcessing(false);
+    }
+  };
 
+  const handleDownload = async () => {
+    if (!appliedResult || !appliedResult.resultUrl) {
+      message.warning('请先应用头像框');
+      return;
+    }
 
+    try {
+      const response = await fetch(appliedResult.resultUrl);
+      const blob = await response.blob();
+
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'avatar-with-frame.png';
+
+      document.body.appendChild(link); // 兼容性
+      link.click();
+      document.body.removeChild(link);
+
+      window.URL.revokeObjectURL(url); // 释放内存
+
+      message.success('头像下载成功！');
+    } catch (err) {
+      console.error('下载失败:', err);
+      message.error('下载失败，请重试');
+    }
+  };
+
+  // 修改分享逻辑，使用与 CustomFrames 相同的方式
   const handleShare = async () => {
     if (!appliedResult || !appliedResult.resultUrl) {
       message.warning('请先应用头像框');
       return;
     }
+    
     setIsProcessing(true);
     try {
-      const shareResponse = await api.createShare(appliedResult.resultUrl, 'wechat');
-      // 保存分享数据
-      setShareData(shareResponse.data);
-      // 显示二维码弹窗
-      setShareModalVisible(true);
-      message.success('分享链接创建成功');
+      // 确保传递的是完整URL
+      const imageUrl = appliedResult.resultUrl;
+      console.log('分享图片URL:', imageUrl);
+      
+      // 调用API创建分享，参数与 CustomFrames 保持一致
+      const shareResponse = await api.createShare(imageUrl, 'wechat', {
+        resultFileId: imageUrl // 添加这个参数，确保与后端期望的格式一致
+      });
+      
+      if (shareResponse.success && shareResponse.data) {
+        // 保存分享数据
+        setShareData(shareResponse.data);
+        // 显示二维码弹窗
+        setShareModalVisible(true);
+        message.success('分享链接创建成功');
+      } else {
+        throw new Error(shareResponse.message || '创建分享失败');
+      }
     } catch (error) {
+      console.error('分享失败:', error);
       message.error('分享失败，请稍后重试');
     } finally {
       setIsProcessing(false);
     }
   };
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout | null = null;
+    
+    if (isProcessing) {
+      // 安全超时：如果超过30秒仍在加载，自动重置状态
+      timer = setTimeout(() => {
+        setIsProcessing(false);
+        message.warning('操作时间过长，已自动取消');
+      }, 30000);
+    }
+    
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [isProcessing]);
 
   return (
     <div className="fade-in-up">

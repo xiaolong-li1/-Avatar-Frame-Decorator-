@@ -1,51 +1,30 @@
 const express = require('express');
 const router = express.Router();
-const axios = require('axios');
-require('dotenv').config();
+const aiController = require('../controllers/aiController');
+// const authMiddleware = require('../middlewares/authMiddleware');
 
-const DEEPAI_API_KEY = process.env.DEEPAI_API_KEY;
+// 超分辨率接口
+router.post('/super-resolution', aiController.applySuperResolution);
 
-// 假设这个函数可以从文件ID获取URL（你需自己实现）
-async function getAvatarUrlFromFileId(fileId) {
-  // TODO: 这里写你自己逻辑，比如从数据库或对象存储获取URL
-  // 示例：
-  return `https://your-object-storage.com/avatars/${fileId}.png`;
-}
+// 风格迁移接口
+router.post('/style-transfer', aiController.applyStyleTransfer);
 
-// 调用DeepAI超分接口
-async function superResolution(imageUrl) {
-  const response = await axios.post(
-    'https://api.deepai.org/api/torch-srgan',
-    { image: imageUrl },
-    { headers: { 'Api-Key': DEEPAI_API_KEY } }
-  );
-  return response.data.output_url;
-}
+// 获取可用风格列表
+router.get('/styles', aiController.getStylesList);
 
-// 超分接口路由
-router.post('/', async (req, res) => {
-  const { avatarFileId, scaleFactor, quality } = req.body;
+// 文本生成图像接口
+router.post('/text-to-image', aiController.generateTextToImage);
 
-  if (!avatarFileId) {
-    return res.status(400).json({ error: 'avatarFileId 是必填参数' });
-  }
+// 文本生成图像历史记录
+router.get('/text-to-image/history', aiController.getTextToImageHistory);
 
-  try {
-    // 1. 获取图片URL
-    const imageUrl = await getAvatarUrlFromFileId(avatarFileId);
+// 背景模糊接口
+router.post('/background-blur', aiController.applyBackgroundBlur);
 
-    // 2. 调用超分辨服务（目前scaleFactor, quality未用）
-    const resultUrl = await superResolution(imageUrl);
+// 背景替换接口
+router.post('/background-replace', aiController.applyBackgroundReplace);
 
-    // 3. 返回结果
-    res.json({
-      status: 'completed',
-      resultUrl,
-    });
-  } catch (error) {
-    console.error('超分错误:', error.message);
-    res.status(500).json({ error: '超分服务失败' });
-  }
-});
+// 获取所有AI处理历史记录
+router.get('/history', aiController.getAIHistory);
 
 module.exports = router;

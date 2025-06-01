@@ -154,3 +154,124 @@ exports.applyFrame = async (req, res) => {
     });
   }
 };
+
+// 获取用户自定义头像框
+exports.getCustomFrames = async (req, res) => {
+  try {
+    // 从查询参数或请求体获取userId
+    const userId = req.query.userId || req.body.userId || '1';
+    console.log('获取头像框 - 使用userId:', userId);
+
+    const { page = 1, limit = 20 } = req.query;
+    const offset = (page - 1) * limit;
+
+    // 查询该用户的自定义头像框
+    const framesResult = await pool.query(
+      'SELECT * FROM frames WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',
+      [userId, limit, offset]
+    );
+
+    const totalResult = await pool.query(
+      'SELECT COUNT(*) as total FROM frames WHERE user_id = $1',
+      [userId]
+    );
+
+    // 返回响应
+    successResponse(res, {
+      frames: framesResult.rows,
+      total: parseInt(totalResult.rows[0].total),
+      page: parseInt(page),
+      limit: parseInt(limit),
+    }, '获取自定义头像框成功');
+  } catch (error) {
+    console.error('获取自定义头像框失败:', error);
+    errorResponse(res, 500, '获取自定义头像框失败', error.message);
+  }
+};
+
+// 上传自定义头像框
+exports.uploadCustomFrame = async (req, res) => {
+  try {
+    // 添加调试信息
+    console.log('=================== 上传头像框 ===================');
+    console.log('Headers:', req.headers);
+    console.log('Request has file?', !!req.file);
+    console.log('File details:', req.file);
+    console.log('Request body:', req.body);
+    console.log('==================================================');
+
+    // 确保有文件上传
+    if (!req.file) {
+      return errorResponse(res, 400, '没有上传文件', '请选择一个文件进行上传');
+    }
+
+    // 直接从请求体获取userId
+    const userId = req.body.userId;
+    console.log('从请求体获取的userId:', userId);
+    
+    // 如果没有userId，使用默认ID
+    const userIdToUse = userId || '1'; // 默认ID为1
+    
+    // 获取表单字段
+    const { name = '自定义头像框', description = '' } = req.body;
+    
+    // 生成文件ID
+    const frameId = uuidv4();
+    
+    // 处理上传的文件
+    const buffer = req.file.buffer;
+    const contentType = req.file.mimetype;
+    
+    // 保存原始图像
+    const filePath = `frames/${frameId}`;
+    const frameUrl = await fileStorageService.uploadFile(buffer, filePath, contentType);
+    
+    // 生成缩略图
+    const thumbnailBuffer = await imageProcessingService.generateThumbnail(buffer);
+    const thumbnailPath = `frames/thumbnails/${frameId}`;
+    const thumbnailUrl = await fileStorageService.uploadFile(thumbnailBuffer, thumbnailPath, 'image/png');
+    
+    // 保存到数据库
+    const result = await pool.query(
+      `INSERT INTO frames (id, name, category, frame_url, thumbnail_url, is_preset, is_animated, user_id, created_at) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP) RETURNING *`,
+      [frameId, name, 'custom', frameUrl, thumbnailUrl, false, false, userIdToUse]
+    );
+
+    successResponse(res, result.rows[0], '头像框上传成功');
+  } catch (error) {
+    console.error('上传自定义头像框失败:', error);
+    errorResponse(res, 500, '上传自定义头像框失败', error.message);
+  }
+};
+
+// 删除自定义头像框
+exports.deleteCustomFrame = async (req, res) => {
+  try {
+    const { frameId } = req.params;
+    // 从查询参数或请求体获取userId
+    const userId = req.query.userId || req.body.userId || '1';
+    console.log('删除头像框 - 使用userId:', userId, '框ID:', frameId);
+    
+    // 检查头像框是否存在且属于该用户
+    const checkResult = await pool.query(
+      'SELECT * FROM frames WHERE id = $1 AND user_id = $2',
+      [frameId, userId]
+    );
+    
+    if (checkResult.rows.length === 0) {
+      return errorResponse(res, 404, '头像框不存在或无权删除', '找不到该头像框或您无权删除');
+    }
+    
+    // 删除头像框记录
+    await pool.query(
+      'DELETE FROM frames WHERE id = $1 AND user_id = $2',
+      [frameId, userId]
+    );
+    
+    successResponse(res, { id: frameId }, '头像框删除成功');
+  } catch (error) {
+    console.error('删除自定义头像框失败:', error);
+    errorResponse(res, 500, '删除自定义头像框失败', error.message);
+  }
+};

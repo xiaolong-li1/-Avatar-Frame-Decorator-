@@ -45,33 +45,50 @@ const App: React.FC = () => {
 const handleLoginRegister = async (values: { username: string; password: string }) => {
   const { username, password } = values;
   try {
-    // api.login / api.register 已经直接返回后端 JSON，
-    // 不要再使用 response.data，而是直接用 response。
+    // 调用 API
     const response = isLogin
       ? await api.login(username, password)
       : await api.register(username, password);
 
-    // 直接把 response 当作后端返回的 JSON 对象
-    const data = response;
-    console.log('API调用结果:', data);
+    console.log('API调用结果:', response);
 
-    // 假设后端登录/注册成功时返回 { token: 'xxx' }
-    if (data?.token) {
-      setUsername(username);
-      setIsModalVisible(false);
-      message.success(isLogin ? '登录成功' : '注册成功');
-      localStorage.setItem('token', data.token);
+    // 检查响应是否成功
+    if (response.success && response.data) {
+      // 从 response.data 中获取 token 和用户信息
+      const { token, user } = response.data;
+      
+      if (token && user) {
+        setUsername(user.username);
+        setIsModalVisible(false);
+        message.success(isLogin ? '登录成功' : '注册成功');
+        
+        // 存储用户信息到 localStorage
+        localStorage.setItem('token', token);
+        localStorage.setItem('userId', user.id);
+        localStorage.setItem('username', user.username);
+      } else {
+        message.error('返回的用户数据格式不正确');
+      }
     } else {
-      message.error('登录或注册失败，请重试');
+      // 处理成功响应但业务失败的情况
+      message.error(response.message || '登录或注册失败，请重试');
     }
   } catch (err: any) {
     console.error('API调用错误:', err);
 
-    // 直接从 err.message 读取后端返回的自定义错误
-    const errorMsg = err.message;
+    // 尝试从不同位置获取错误信息
+    let errorMsg = '';
+    if (err.response?.data?.message) {
+      // API 返回的错误消息
+      errorMsg = err.response.data.message;
+    } else if (err.message) {
+      // 一般错误消息
+      errorMsg = err.message;
+    }
+    
     console.log('后端错误信息:', errorMsg);
 
-    if (!isLogin && errorMsg === '用户名已存在') {
+    if (!isLogin && errorMsg.includes('用户名已存在')) {
       message.error('用户名已存在，请更换用户名');
       return;
     }
