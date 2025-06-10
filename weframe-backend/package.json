@@ -1,11 +1,17 @@
 {
   "name": "weframe-backend",
   "version": "1.0.0",
-  "description": "WeFrame backend API",
+  "description": "Avatar Frame Decorator Backend",
   "main": "app.js",
   "scripts": {
-    "start": "node app.js",
-    "dev": "nodemon app.js"
+    "test-connection": "node scripts/testConnection.js",
+    "create-db": "node scripts/createDatabase.js",
+    "init-db": "node scripts/initDatabase.js",
+    "test-db": "node scripts/testDatabase.js",
+    "update-frames": "node scripts/updatePresetFrameUrls.js",
+    "setup-full": "npm run test-connection && npm run create-db && npm run init-db && npm run test-db",
+    "dev": "nodemon app.js",
+    "start": "node app.js"
   },
   "dependencies": {
     "aws-sdk": "^2.1043.0",

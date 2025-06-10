@@ -16,9 +16,132 @@ async function getAvatarUrlFromFileId(avatarFileId) {
   throw new Error('Avatar file not found or URL is missing');
 }
 
-// 超分辨率处理（暂时不实现，返回提示信息）
+// 超分辨率处理
 exports.applySuperResolution = async (req, res) => {
-  return errorResponse(res, '超分辨率功能暂未实现，请等待后续更新', 501);
+  try {
+    const { avatarFileId, scaleFactor = 2, quality = 'high', userId } = req.body;
+
+    if (!avatarFileId) {
+      return res.status(400).json({
+        success: false,
+        message: '缺少头像文件ID'
+      });
+    }
+
+    // 验证参数
+    if (scaleFactor < 1 || scaleFactor > 8) {
+      return res.status(400).json({
+        success: false,
+        message: '放大倍数必须在1-8之间'
+      });
+    }
+
+    if (!['standard', 'high', 'ultra'].includes(quality)) {
+      return res.status(400).json({
+        success: false,
+        message: '质量参数必须是 standard、high 或 ultra'
+      });
+    }
+
+    // 1. 从avatars表获取头像信息
+    const avatarQuery = 'SELECT * FROM avatars WHERE id = $1 AND is_active = true';
+    const avatarResult = await pool.query(avatarQuery, [avatarFileId]);
+    
+    if (avatarResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: '找不到指定的头像或头像已被删除'
+      });
+    }
+
+    const avatarInfo = avatarResult.rows[0];
+    const originalUrl = avatarInfo.file_url;
+
+    if (!originalUrl) {
+      return res.status(404).json({
+        success: false,
+        message: '头像文件URL不存在'
+      });
+    }
+
+    console.log('🚀 开始超分辨处理:', {
+      avatarFileId,
+      scaleFactor,
+      quality,
+      originalUrl,
+      userId: userId || 'anonymous'
+    });
+
+    // 2. 调用AI服务进行超分辨处理
+    let processedUrl;
+    try {
+      processedUrl = await aiService.superResolution(originalUrl, scaleFactor, quality);
+      console.log('✅ 超分辨处理完成:', processedUrl);
+    } catch (error) {
+      console.error('❌ AI超分辨处理失败:', error);
+      
+      // 根据错误类型返回不同的错误信息
+      if (error.message.includes('下载图像失败')) {
+        return res.status(502).json({
+          success: false,
+          message: '无法下载原始图像，请检查图像链接是否有效'
+        });
+      } else if (error.message.includes('API 错误')) {
+        return res.status(502).json({
+          success: false,
+          message: 'AI服务暂时不可用，请稍后重试'
+        });
+      } else if (error.message.includes('timeout')) {
+        return res.status(408).json({
+          success: false,
+          message: '处理超时，请稍后重试'
+        });
+      } else {
+        return res.status(500).json({
+          success: false,
+          message: '超分辨处理失败: ' + error.message
+        });
+      }
+    }
+
+    // 3. 保存AI生成记录到数据库
+    let recordId = null;
+    try {
+      recordId = await aiService.saveAIGeneratedRecord(
+        userId || null,
+        'super_resolution',
+        originalUrl,
+        `超分辨率增强 - 放大倍数: ${scaleFactor}x, 质量: ${quality}`,
+        processedUrl,
+        'openai-edit',
+        { scaleFactor, quality }
+      );
+      console.log('📝 记录已保存到数据库，ID:', recordId);
+    } catch (dbError) {
+      console.error('⚠️ 保存记录失败，但处理成功:', dbError.message);
+      // 不影响主流程
+    }
+
+    // 4. 返回成功结果
+    return res.json({
+      success: true,
+      message: '超分辨处理成功',
+      data: {
+        resultUrl: processedUrl,
+        taskId: recordId,
+        status: 'completed',
+        scaleFactor: scaleFactor,
+        quality: quality
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ 超分辨处理失败:', error);
+    return res.status(500).json({
+      success: false,
+      message: '服务器内部错误: ' + error.message
+    });
+  }
 };
 
 // 风格迁移处理
@@ -148,39 +271,121 @@ exports.getTextToImageHistory = async (req, res) => {
   }
 };
 
-// 背景模糊处理
 exports.applyBackgroundBlur = async (req, res) => {
-  const { avatarFileId, blurLevel = 5, userId } = req.body;
-
-  if (!avatarFileId) {
-    return errorResponse(res, '缺少 avatarFileId 参数', 400);
-  }
-
   try {
-    console.log(`控制器接收到背景模糊请求: avatarFileId=${avatarFileId}, blurLevel=${blurLevel}`);
+    const { avatarFileId, blurLevel = 5, userId } = req.body;
 
-    const imageUrl = await getAvatarUrlFromFileId(avatarFileId);
-    const resultUrl = await aiService.backgroundBlur(imageUrl, blurLevel);
-    console.log(`AI服务返回背景模糊结果URL: ${resultUrl}`);
-
-    // 保存记录到数据库
-    const recordId = await aiService.saveAIGeneratedRecord(
-      userId,
-      'background-blur',
-      imageUrl,
-      `Apply blur level ${blurLevel} to background`,
-      resultUrl,
-      'dall-e-2',
-      { blurLevel }
-    );
-
-    return successResponse(res, { taskId: recordId, resultUrl }, '背景模糊处理成功');
-  } catch (error) {
-    console.error('❌ 背景模糊处理失败:', error.message);
-    if (error.message.includes('Avatar file not found')) {
-      return errorResponse(res, '头像文件未找到', 404);
+    if (!avatarFileId) {
+      return res.status(400).json({
+        success: false,
+        message: '缺少头像文件ID'
+      });
     }
-    return errorResponse(res, `背景模糊处理失败: ${error.message}`, 500);
+
+    // 验证 blurLevel 参数
+    if (blurLevel < 1 || blurLevel > 10) {
+      return res.status(400).json({
+        success: false,
+        message: '模糊级别必须在1-10之间'
+      });
+    }
+
+    // 1. 从avatars表获取头像信息
+    const avatarQuery = 'SELECT * FROM avatars WHERE id = $1 AND is_active = true';
+    const avatarResult = await pool.query(avatarQuery, [avatarFileId]);
+    
+    if (avatarResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: '找不到指定的头像或头像已被删除'
+      });
+    }
+
+    const avatarInfo = avatarResult.rows[0];
+    const originalUrl = avatarInfo.file_url;
+
+    if (!originalUrl) {
+      return res.status(404).json({
+        success: false,
+        message: '头像文件URL不存在'
+      });
+    }
+
+    console.log('🚀 开始背景模糊处理:', {
+      avatarFileId,
+      blurLevel,
+      originalUrl,
+      userId: userId || 'anonymous'
+    });
+
+    // 2. 调用AI服务进行背景模糊处理
+    let processedUrl;
+    try {
+      processedUrl = await aiService.backgroundBlur(originalUrl, blurLevel);
+      console.log('✅ 背景模糊处理完成:', processedUrl);
+    } catch (error) {
+      console.error('❌ AI背景模糊处理失败:', error);
+      
+      // 根据错误类型返回不同的错误信息
+      if (error.message.includes('下载图像失败')) {
+        return res.status(502).json({
+          success: false,
+          message: '无法下载原始图像，请检查图像链接是否有效'
+        });
+      } else if (error.message.includes('API 错误')) {
+        return res.status(502).json({
+          success: false,
+          message: 'AI服务暂时不可用，请稍后重试'
+        });
+      } else if (error.message.includes('timeout')) {
+        return res.status(408).json({
+          success: false,
+          message: '处理超时，请稍后重试'
+        });
+      } else {
+        return res.status(500).json({
+          success: false,
+          message: '背景模糊处理失败: ' + error.message
+        });
+      }
+    }
+
+    // 3. 保存AI生成记录到数据库
+    let recordId = null;
+    try {
+      recordId = await aiService.saveAIGeneratedRecord(
+        userId || null,
+        'background_blur',
+        originalUrl,
+        `背景模糊强度: ${blurLevel}`,
+        processedUrl,
+        'openai-edit',
+        { blurLevel }
+      );
+      console.log('📝 记录已保存到数据库，ID:', recordId);
+    } catch (dbError) {
+      console.error('⚠️ 保存记录失败，但处理成功:', dbError.message);
+      // 不影响主流程
+    }
+
+    // 4. 返回成功结果
+    return res.json({
+      success: true,
+      message: '背景模糊处理成功',
+      data: {
+        resultUrl: processedUrl,
+        taskId: recordId,
+        status: 'completed',
+        blurLevel: blurLevel
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ 背景模糊处理失败:', error);
+    return res.status(500).json({
+      success: false,
+      message: '服务器内部错误: ' + error.message
+    });
   }
 };
 
@@ -222,17 +427,249 @@ exports.applyBackgroundReplace = async (req, res) => {
 
 // 获取所有AI处理历史记录
 exports.getAIHistory = async (req, res) => {
+  console.log('🔍 getAIHistory 被调用, req.query:', req.query);
   const { userId, taskType, page = 1, limit = 10 } = req.query;
+
+  if (!userId) {
+    console.log('❌ 缺少 userId 参数');
+    return errorResponse(res, '缺少 userId 参数', 400);
+  }
+
+  try {
+    console.log('📡 调用 aiService.getAIGeneratedHistory:', { userId, taskType, page: parseInt(page), limit: parseInt(limit) });
+    const history = await aiService.getAIGeneratedHistory(userId, taskType, parseInt(page), parseInt(limit));
+    console.log('✅ 获取历史记录成功, 记录数量:', history.records?.length || 0);
+    return successResponse(res, history, '获取AI历史记录成功');
+  } catch (error) {
+    console.error('❌ 获取AI历史记录失败:', error.message);
+    return errorResponse(res, `获取AI历史记录失败: ${error.message}`, 500);
+  }
+};
+
+// 获取超分辨率历史记录
+exports.getSuperResolutionHistory = async (req, res) => {
+  console.log('🔍 getSuperResolutionHistory 被调用, req.query:', req.query);
+  const { userId, page = 1, limit = 10 } = req.query;
+
+  if (!userId) {
+    console.log('❌ 缺少 userId 参数');
+    return errorResponse(res, '缺少 userId 参数', 400);
+  }
+
+  try {
+    console.log('📡 调用 aiService.getAIGeneratedHistory (super_resolution):', { userId, page: parseInt(page), limit: parseInt(limit) });
+    const history = await aiService.getAIGeneratedHistory(userId, 'super_resolution', parseInt(page), parseInt(limit));
+    console.log('✅ 获取超分辨率历史记录成功, 记录数量:', history.records?.length || 0);
+    return successResponse(res, history, '获取超分辨率历史记录成功');
+  } catch (error) {
+    console.error('❌ 获取超分辨率历史记录失败:', error.message);
+    return errorResponse(res, `获取超分辨率历史记录失败: ${error.message}`, 500);
+  }
+};
+
+// 获取风格迁移历史记录
+exports.getStyleTransferHistory = async (req, res) => {
+  const { userId, page = 1, limit = 10 } = req.query;
 
   if (!userId) {
     return errorResponse(res, '缺少 userId 参数', 400);
   }
 
   try {
-    const history = await aiService.getAIGeneratedHistory(userId, taskType, parseInt(page), parseInt(limit));
-    return successResponse(res, history, '获取AI历史记录成功');
+    const history = await aiService.getAIGeneratedHistory(userId, 'style-transfer', parseInt(page), parseInt(limit));
+    return successResponse(res, history, '获取风格迁移历史记录成功');
   } catch (error) {
-    console.error('❌ 获取AI历史记录失败:', error.message);
-    return errorResponse(res, `获取AI历史记录失败: ${error.message}`, 500);
+    console.error('❌ 获取风格迁移历史记录失败:', error.message);
+    return errorResponse(res, `获取风格迁移历史记录失败: ${error.message}`, 500);
+  }
+};
+
+// 获取背景模糊历史记录
+exports.getBackgroundBlurHistory = async (req, res) => {
+  const { userId, page = 1, limit = 10 } = req.query;
+
+  if (!userId) {
+    return errorResponse(res, '缺少 userId 参数', 400);
+  }
+
+  try {
+    const history = await aiService.getAIGeneratedHistory(userId, 'background_blur', parseInt(page), parseInt(limit));
+    return successResponse(res, history, '获取背景模糊历史记录成功');
+  } catch (error) {
+    console.error('❌ 获取背景模糊历史记录失败:', error.message);
+    return errorResponse(res, `获取背景模糊历史记录失败: ${error.message}`, 500);
+  }
+};
+
+// 获取背景替换历史记录
+exports.getBackgroundReplaceHistory = async (req, res) => {
+  const { userId, page = 1, limit = 10 } = req.query;
+
+  if (!userId) {
+    return errorResponse(res, '缺少 userId 参数', 400);
+  }
+
+  try {
+    const history = await aiService.getAIGeneratedHistory(userId, 'background-replace', parseInt(page), parseInt(limit));
+    return successResponse(res, history, '获取背景替换历史记录成功');
+  } catch (error) {
+    console.error('❌ 获取背景替换历史记录失败:', error.message);
+    return errorResponse(res, `获取背景替换历史记录失败: ${error.message}`, 500);
+  }
+};
+
+// 删除单个AI记录
+exports.deleteAIRecord = async (req, res) => {
+  try {
+    const { recordId } = req.params;
+    const { userId } = req.body;
+
+    console.log('🗑️ 删除AI记录请求:', { recordId, userId });
+
+    if (!recordId) {
+      return res.status(400).json({
+        success: false,
+        message: '缺少记录ID参数'
+      });
+    }
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: '缺少用户ID参数'
+      });
+    }
+
+    // 调用服务层删除记录
+    const result = await aiService.deleteAIGeneratedRecord(userId, recordId);
+
+    return res.json({
+      success: true,
+      message: '记录删除成功',
+      data: {
+        deletedRecord: result.deletedRecord
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ 删除AI记录失败:', error);
+    
+    if (error.message.includes('记录不存在或无权限删除')) {
+      return res.status(404).json({
+        success: false,
+        message: '记录不存在或您没有权限删除该记录'
+      });
+    }
+    
+    return res.status(500).json({
+      success: false,
+      message: '删除记录失败: ' + error.message
+    });
+  }
+};
+
+// 批量删除AI记录
+exports.deleteMultipleAIRecords = async (req, res) => {
+  try {
+    const { recordIds, userId } = req.body;
+
+    console.log('🗑️ 批量删除AI记录请求:', { recordIds, userId });
+
+    if (!recordIds || !Array.isArray(recordIds) || recordIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: '缺少记录ID数组参数'
+      });
+    }
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: '缺少用户ID参数'
+      });
+    }
+
+    // 验证记录ID数量限制
+    if (recordIds.length > 100) {
+      return res.status(400).json({
+        success: false,
+        message: '单次最多只能删除100条记录'
+      });
+    }
+
+    // 调用服务层批量删除记录
+    const result = await aiService.deleteMultipleAIRecords(userId, recordIds);
+
+    return res.json({
+      success: true,
+      message: `成功删除 ${result.deletedCount} 条记录`,
+      data: {
+        deletedCount: result.deletedCount,
+        deletedRecords: result.deletedRecords,
+        fileDeleteResults: result.fileDeleteResults
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ 批量删除AI记录失败:', error);
+    
+    if (error.message.includes('没有找到可删除的记录')) {
+      return res.status(404).json({
+        success: false,
+        message: '没有找到可删除的记录'
+      });
+    }
+    
+    return res.status(500).json({
+      success: false,
+      message: '批量删除记录失败: ' + error.message
+    });
+  }
+};
+
+// 删除所有AI记录
+exports.deleteAllAIRecords = async (req, res) => {
+  try {
+    const { userId, taskType } = req.body;
+
+    console.log('🗑️ 删除所有AI记录请求:', { userId, taskType });
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: '缺少用户ID参数'
+      });
+    }
+
+    // 调用服务层删除所有记录
+    const result = await aiService.deleteAllAIRecordsByUser(userId, taskType);
+
+    if (result.deletedCount === 0) {
+      return res.json({
+        success: true,
+        message: '没有找到需要删除的记录',
+        data: {
+          deletedCount: 0
+        }
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: `成功删除 ${result.deletedCount} 条记录`,
+      data: {
+        deletedCount: result.deletedCount,
+        taskType: taskType || 'all',
+        fileDeleteResults: result.fileDeleteResults
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ 删除所有AI记录失败:', error);
+    
+    return res.status(500).json({
+      success: false,
+      message: '删除所有记录失败: ' + error.message
+    });
   }
 };

@@ -258,7 +258,7 @@ const PresetFrames: React.FC = () => {
   };
 
   useEffect(() => {
-    let timer: NodeJS.Timeout | null = null;
+    let timer: number | null = null;
     
     if (isProcessing) {
       // 安全超时：如果超过30秒仍在加载，自动重置状态

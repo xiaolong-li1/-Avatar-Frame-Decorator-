@@ -2,7 +2,7 @@
 export const API_CONFIG = {
   // 基础配置
   BASE_URL: 'http://localhost:3000',
-  TIMEOUT: 30000, // 30秒超时
+  TIMEOUT: 300000, // 300秒超时
   
   // 文件上传配置
   UPLOAD: {
@@ -47,6 +47,15 @@ export const API_ENDPOINTS = {
     BACKGROUND_BLUR: '/ai/background-blur',
     BACKGROUND_REPLACE: '/ai/background-replace',
     TASK_STATUS: (taskId: string) => `/ai/task/${taskId}/status`,
+    // 添加各种历史记录端点
+    HISTORY: '/ai/history',
+    SUPER_RESOLUTION_HISTORY: '/ai/super-resolution/history',
+    STYLE_TRANSFER_HISTORY: '/ai/style-transfer/history',
+    BACKGROUND_BLUR_HISTORY: '/ai/background-blur/history',
+    BACKGROUND_REPLACE_HISTORY: '/ai/background-replace/history',
+    DELETE_RECORD: (recordId: string) => `/ai/history/${recordId}`,
+    DELETE_BATCH: '/ai/history/batch',
+    DELETE_ALL: '/ai/history/all',
   },
 
   // 动态特效
@@ -137,4 +146,25 @@ export interface Effect {
   previewUrl: string
   type: string
   duration: number
-} 
+}
+
+// AI历史记录类型
+export interface AIHistoryRecord {
+  id: string
+  task_type: string
+  input_prompt: string
+  result_url: string
+  model_used: string
+  parameters: Record<string, any>
+  created_at: string
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  user_id?: string
+}
+
+// 历史记录响应类型
+export interface HistoryResponse {
+  records: AIHistoryRecord[]
+  total: number
+  page: number
+  totalPages: number
+}

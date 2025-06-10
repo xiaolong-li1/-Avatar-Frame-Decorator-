@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react'
-import { Card, Row, Col, Button, Typography, Space, message, Upload, Divider, Slider, Spin, Modal } from 'antd'
+import { Card, Row, Col, Button, Typography, Space, message, Upload, Divider, Slider, Spin, Modal, Checkbox } from 'antd'
 import { UploadOutlined, DeleteOutlined, EditOutlined, LoadingOutlined } from '@ant-design/icons'
 import AvatarUpload from '../components/AvatarUpload'
 import { api, handleApiError } from '../services/api'
 
 const { Title, Paragraph } = Typography
 const { Dragger } = Upload
+const { confirm } = Modal
 
 interface CustomFrame {
   id: string
@@ -32,6 +33,11 @@ const CustomFrames: React.FC = () => {
     qrCodeUrl: string;
     expiresAt: string;
   } | null>(null)
+  
+  // 批量选择相关状态
+  const [batchMode, setBatchMode] = useState(false)
+  const [selectedFrameIds, setSelectedFrameIds] = useState<string[]>([])
+  const [isDeletingBatch, setIsDeletingBatch] = useState(false)
 
   // 加载用户已有的自定义头像框
   useEffect(() => {
@@ -107,23 +113,168 @@ const CustomFrames: React.FC = () => {
     return false // 阻止自动上传
   }
 
-  const handleDeleteFrame = async (frameId: string) => {
-    try {
-      const response = await api.deleteCustomFrame(frameId)
-      
-      if (response.success) {
-        // 从本地状态中移除已删除的头像框
-        setCustomFrames(prev => prev.filter(frame => frame.id !== frameId))
-        if (selectedFrame?.id === frameId) {
-          setSelectedFrame(null)
-          setPreviewImage(userAvatar) // 重置预览图为原始头像
+  // 删除单个头像框 - 改进版本
+  const handleDeleteFrame = async (frameId: string, frameName?: string) => {
+    confirm({
+      title: '确认删除',
+      content: `确定要删除头像框 "${frameName || 'Unknown'}" 吗？删除后无法恢复。`,
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          console.log('开始删除头像框:', frameId);
+          const response = await api.deleteCustomFrame(frameId)
+          
+          if (response.success) {
+            // 从本地状态中移除已删除的头像框
+            setCustomFrames(prev => prev.filter(frame => frame.id !== frameId))
+            
+            // 如果删除的是当前选中的头像框，重置选择
+            if (selectedFrame?.id === frameId) {
+              setSelectedFrame(null)
+              setPreviewImage(userAvatar || '') // 重置预览图为原始头像
+            }
+            
+            // 从批量选择中移除
+            if (selectedFrameIds.includes(frameId)) {
+              setSelectedFrameIds(prev => prev.filter(id => id !== frameId))
+            }
+            
+            message.success('头像框删除成功！')
+            console.log('删除响应:', response.data);
+          } else {
+            throw new Error(response.message || '删除头像框失败')
+          }
+        } catch (error) {
+          console.error('删除头像框失败:', error)
+          handleApiError(error)
         }
-        message.success('头像框删除成功！')
-      } else {
-        message.error('头像框删除失败：' + response.message)
       }
-    } catch (error) {
-      handleApiError(error)
+    })
+  }
+
+  // 批量删除头像框
+  const handleBatchDelete = async () => {
+    if (selectedFrameIds.length === 0) {
+      message.warning('请选择要删除的头像框')
+      return
+    }
+
+    const selectedFrameNames = customFrames
+      .filter(frame => selectedFrameIds.includes(frame.id))
+      .map(frame => frame.name)
+      .join('、')
+
+    confirm({
+      title: '批量删除确认',
+      content: (
+        <div>
+          <p>确定要删除以下 {selectedFrameIds.length} 个头像框吗？</p>
+          <p style={{ color: '#666', fontSize: '12px', maxHeight: '100px', overflow: 'auto' }}>
+            {selectedFrameNames}
+          </p>
+          <p style={{ color: '#ff4d4f', fontWeight: 'bold' }}>删除后无法恢复！</p>
+        </div>
+      ),
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        setIsDeletingBatch(true)
+        try {
+          console.log('开始批量删除头像框:', selectedFrameIds);
+          const response = await api.deleteMultipleCustomFrames(selectedFrameIds)
+          
+          if (response.success) {
+            // 从本地状态中移除已删除的头像框
+            setCustomFrames(prev => prev.filter(frame => !selectedFrameIds.includes(frame.id)))
+            
+            // 如果删除的包含当前选中的头像框，重置选择
+            if (selectedFrame && selectedFrameIds.includes(selectedFrame.id)) {
+              setSelectedFrame(null)
+              setPreviewImage(userAvatar || '')
+            }
+            
+            // 清空批量选择
+            setSelectedFrameIds([])
+            setBatchMode(false)
+            
+            message.success(`成功删除 ${response.data.deletedCount} 个头像框！`)
+            console.log('批量删除响应:', response.data);
+          } else {
+            throw new Error(response.message || '批量删除头像框失败')
+          }
+        } catch (error) {
+          console.error('批量删除头像框失败:', error)
+          handleApiError(error)
+        } finally {
+          setIsDeletingBatch(false)
+        }
+      }
+    })
+  }
+
+  // 删除所有头像框
+  const handleDeleteAll = async () => {
+    if (customFrames.length === 0) {
+      message.info('没有头像框可删除')
+      return
+    }
+
+    confirm({
+      title: '删除所有头像框',
+      content: (
+        <div>
+          <p>确定要删除所有 {customFrames.length} 个头像框吗？</p>
+          <p style={{ color: '#ff4d4f', fontWeight: 'bold' }}>此操作无法恢复！</p>
+        </div>
+      ),
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        const allFrameIds = customFrames.map(frame => frame.id)
+        setIsDeletingBatch(true)
+        try {
+          const response = await api.deleteMultipleCustomFrames(allFrameIds)
+          
+          if (response.success) {
+            setCustomFrames([])
+            setSelectedFrame(null)
+            setPreviewImage(userAvatar || '')
+            setSelectedFrameIds([])
+            setBatchMode(false)
+            
+            message.success(`成功删除所有 ${response.data.deletedCount} 个头像框！`)
+          } else {
+            throw new Error(response.message || '删除所有头像框失败')
+          }
+        } catch (error) {
+          console.error('删除所有头像框失败:', error)
+          handleApiError(error)
+        } finally {
+          setIsDeletingBatch(false)
+        }
+      }
+    })
+  }
+
+  // 处理批量选择
+  const handleBatchSelect = (frameId: string, checked: boolean) => {
+    if (checked) {
+      setSelectedFrameIds(prev => [...prev, frameId])
+    } else {
+      setSelectedFrameIds(prev => prev.filter(id => id !== frameId))
+    }
+  }
+
+  // 全选/取消全选
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedFrameIds(customFrames.map(frame => frame.id))
+    } else {
+      setSelectedFrameIds([])
     }
   }
 
@@ -453,7 +604,63 @@ const CustomFrames: React.FC = () => {
           </Card>
 
           {/* 我的头像框 */}
-          <Card title={`我的头像框 (${customFrames.length})`}>
+          <Card 
+            title={
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>我的头像框 ({customFrames.length})</span>
+                {customFrames.length > 0 && (
+                  <Space>
+                    {batchMode && (
+                      <>
+                        <Checkbox
+                          checked={selectedFrameIds.length === customFrames.length}
+                          indeterminate={selectedFrameIds.length > 0 && selectedFrameIds.length < customFrames.length}
+                          onChange={(e) => handleSelectAll(e.target.checked)}
+                        >
+                          全选
+                        </Checkbox>
+                        <Button 
+                          danger 
+                          size="small"
+                          loading={isDeletingBatch}
+                          disabled={selectedFrameIds.length === 0}
+                          onClick={handleBatchDelete}
+                        >
+                          删除选中 ({selectedFrameIds.length})
+                        </Button>
+                        <Button 
+                          size="small"
+                          onClick={() => {
+                            setBatchMode(false)
+                            setSelectedFrameIds([])
+                          }}
+                        >
+                          取消
+                        </Button>
+                      </>
+                    )}
+                    {!batchMode && (
+                      <>
+                        <Button 
+                          size="small"
+                          onClick={() => setBatchMode(true)}
+                        >
+                          批量管理
+                        </Button>
+                        <Button 
+                          danger 
+                          size="small"
+                          onClick={handleDeleteAll}
+                        >
+                          删除全部
+                        </Button>
+                      </>
+                    )}
+                  </Space>
+                )}
+              </div>
+            }
+          >
             {isLoading ? (
               <div style={{ textAlign: 'center', padding: '40px' }}>
                 <Spin />
@@ -476,10 +683,11 @@ const CustomFrames: React.FC = () => {
                       hoverable
                       style={{ 
                         textAlign: 'center',
-                        border: selectedFrame?.id === frame.id ? '2px solid #1890ff' : '1px solid #d9d9d9'
+                        border: selectedFrame?.id === frame.id ? '2px solid #1890ff' : '1px solid #d9d9d9',
+                        position: 'relative'
                       }}
                       bodyStyle={{ padding: '12px' }}
-                      actions={[
+                      actions={batchMode ? [] : [
                         <EditOutlined 
                           key="select" 
                           onClick={() => handleFrameSelect(frame)}
@@ -487,12 +695,25 @@ const CustomFrames: React.FC = () => {
                         />,
                         <DeleteOutlined 
                           key="delete" 
-                          onClick={() => handleDeleteFrame(frame.id)}
+                          onClick={() => handleDeleteFrame(frame.id, frame.name)}
                           title="删除"
                           style={{ color: '#ff4d4f' }}
                         />
                       ]}
                     >
+                      {batchMode && (
+                        <Checkbox
+                          style={{ 
+                            position: 'absolute', 
+                            top: '8px', 
+                            left: '8px', 
+                            zIndex: 1 
+                          }}
+                          checked={selectedFrameIds.includes(frame.id)}
+                          onChange={(e) => handleBatchSelect(frame.id, e.target.checked)}
+                        />
+                      )}
+                      
                       <img 
                         src={frame.thumbnail_url || frame.frame_url} 
                         alt={frame.name}
@@ -501,7 +722,8 @@ const CustomFrames: React.FC = () => {
                           height: '80px', 
                           objectFit: 'cover',
                           borderRadius: '8px',
-                          marginBottom: '8px'
+                          marginBottom: '8px',
+                          opacity: batchMode && selectedFrameIds.includes(frame.id) ? 0.7 : 1
                         }}
                       />
                       <div style={{ 

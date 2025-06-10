@@ -25,6 +25,7 @@ import DynamicEffects from './pages/DynamicEffects'
 import Copyright from './pages/Copyright'
 import SaveShare from './pages/SaveShare'
 import BackgroundBlur from './pages/BackgroundBlur'
+import AIHistory from './pages/AIHistory';
 import api from './services/api' // 替换 axios
 
 const { Header, Sider, Content } = Layout
@@ -112,7 +113,8 @@ const handleLoginRegister = async (values: { username: string; password: string 
     { key: '/dynamic-effects', icon: <StarOutlined />, label: '动态特效头像' },
     { key: '/background-blur', icon: <CameraOutlined />, label: '人像背景虚化' },
     { key: '/copyright', icon: <SafetyOutlined />, label: '头像版权保护' },
-    { key: '/save-share', icon: <SaveOutlined />, label: '头像保存分享' }
+    { key: '/save-share', icon: <SaveOutlined />, label: '头像保存分享' },
+    { key: '/ai-history', icon: <CameraOutlined />, label: 'AI 处理历史' }
   ]
 
   return (
@@ -160,6 +162,7 @@ const handleLoginRegister = async (values: { username: string; password: string 
             <Route path="/background-blur" element={<BackgroundBlur />} />
             <Route path="/copyright" element={<Copyright />} />
             <Route path="/save-share" element={<SaveShare />} />
+            <Route path="/ai-history" element={<AIHistory />} />
           </Routes>
         </Content>
       </Layout>
