@@ -83,3 +83,25 @@ exports.login = async (req, res) => {
     });
   }
 };
+
+// 获取用户统计信息
+exports.getUserStats = async (req, res) => {
+  try {
+    // 查询用户总数
+    const userCountResult = await pool.query('SELECT COUNT(*) as count FROM users');
+    const userCount = parseInt(userCountResult.rows[0].count, 10);
+    
+    res.json({
+      success: true,
+      data: {
+        userCount
+      }
+    });
+  } catch (error) {
+    console.error('获取用户统计信息失败:', error);
+    res.status(500).json({ 
+      success: false,
+      message: '获取用户统计信息失败' 
+    });
+  }
+};

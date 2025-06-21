@@ -3,6 +3,7 @@ import { Card, Row, Col, Button, Typography, Space, message, Divider, Spin, Moda
 import { DownloadOutlined, ShareAltOutlined,QrcodeOutlined } from '@ant-design/icons';
 import AvatarUpload from '../components/AvatarUpload';
 import { api, pollTaskStatus } from '../services/api';
+import usePersistedState from '../hooks/usePersistedState';
 
 const { Title, Paragraph } = Typography;
 
@@ -24,7 +25,7 @@ interface AppliedResult {
 }
 
 const PresetFrames: React.FC = () => {
-  const [userAvatar, setUserAvatar] = useState<AvatarData | null>(null);
+  const [userAvatar, setUserAvatar] = usePersistedState<AvatarData | null>('preset-frames-avatar', null);
   const [selectedFrame, setSelectedFrame] = useState<FrameTemplate | null>(null);
   const [appliedResult, setAppliedResult] = useState<AppliedResult | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -77,10 +78,11 @@ const PresetFrames: React.FC = () => {
   const handleAvatarChange = (data: AvatarData) => {
     setUserAvatar(data);
     setAppliedResult(null);
-    message.info('没有头像框...');
     if (selectedFrame) {
       message.info('头像已上传，正在应用头像框...');
       applyFrame(selectedFrame);
+    } else {
+      message.info('头像已上传，请选择一个头像框');
     }
   };
 
@@ -258,7 +260,7 @@ const PresetFrames: React.FC = () => {
   };
 
   useEffect(() => {
-    let timer: NodeJS.Timeout | null = null;
+    let timer: number | null = null;
     
     if (isProcessing) {
       // 安全超时：如果超过30秒仍在加载，自动重置状态

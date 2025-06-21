@@ -1,5 +1,15 @@
 import { message } from 'antd'
-import { API_CONFIG, API_ENDPOINTS, ApiResponse, UploadResponse, TaskStatus, Frame, ArtStyle, Effect } from '../config/api'
+import { API_CONFIG, API_ENDPOINTS, ApiResponse, UploadResponse, TaskStatus, Frame, ArtStyle } from '../config/api'
+import Cookies from 'js-cookie'
+
+// Cookie选项
+const COOKIE_OPTIONS = {
+  expires: 7, // 7天过期
+  path: '/',
+  sameSite: 'strict' as 'strict',
+  secure: window.location.protocol === 'https:'
+};
+
 // 基于 Fetch 的封装类
 class ApiService {
   private baseURL: string;
@@ -78,9 +88,25 @@ private async request<T>(
   }
 }
 
-  // GET 请求
-  async get<T>(endpoint: string): Promise<ApiResponse<T>> {
-    return this.request<T>(endpoint, { method: 'GET' });
+  // GET 请求 - 修改以支持查询参数
+  async get<T>(endpoint: string, options?: { params?: Record<string, any> }): Promise<ApiResponse<T>> {
+    let url = endpoint;
+    
+    // 如果有查询参数，构建查询字符串
+    if (options?.params) {
+      const searchParams = new URLSearchParams();
+      Object.entries(options.params).forEach(([key, value]) => {
+        if (value !== null && value !== undefined) {
+          searchParams.append(key, String(value));
+        }
+      });
+      const queryString = searchParams.toString();
+      if (queryString) {
+        url += (url.includes('?') ? '&' : '?') + queryString;
+      }
+    }
+    
+    return this.request<T>(url, { method: 'GET' });
   }
 
   // POST 请求
@@ -99,58 +125,74 @@ private async request<T>(
     });
   }
 
-  // DELETE 请求
-  async delete<T>(endpoint: string): Promise<ApiResponse<T>> {
-    return this.request<T>(endpoint, { method: 'DELETE' });
+  // DELETE 请求 - 修改以支持请求体数据
+  async delete<T>(endpoint: string, options?: { data?: any }): Promise<ApiResponse<T>> {
+    const requestOptions: RequestInit = { 
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      }
+    };
+    
+    // 如果有数据，添加到请求体
+    if (options?.data) {
+      requestOptions.body = JSON.stringify(options.data);
+    }
+    
+    return this.request<T>(endpoint, requestOptions);
   }
 
-  // 文件上传（保持原有逻辑）
-  async uploadFile(endpoint: string, file: File, additionalData?: Record<string, string>): Promise<ApiResponse<UploadResponse>> {
+  // 文件上传方法 - 确保字段名为 'file'
+  async uploadFile<T>(endpoint: string, file: File, additionalData: Record<string, any> = {}): Promise<ApiResponse<T>> {
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append('file', file); // 确保字段名是 'file'
     
-    // 添加用户ID到所有请求
+    // 添加其他数据
+    Object.keys(additionalData).forEach(key => {
+      formData.append(key, additionalData[key]);
+    });
+
+    // 添加用户ID
     const userId = localStorage.getItem('userId');
-    console.log('当前用户ID:', userId);
     if (userId) {
       formData.append('userId', userId);
     }
-    
-    if (additionalData) {
-      Object.entries(additionalData).forEach(([key, value]) => {
-        formData.append(key, value);
-      });
+
+    console.log('当前用户ID:', userId);
+    console.log('FormData entries:');
+    for (let [key, value] of formData.entries()) {
+      console.log(key, value);
     }
 
     const token = localStorage.getItem('token');
     const headers: Record<string, string> = {};
+    
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
-      console.log('Using token for authorization:', token.substring(0, 10) + '...');
-    } else {
-      console.warn('No token found, request may be unauthorized');
+      console.log('Using token for authorization:', token.substring(0, 20) + '...');
     }
 
-    const url = `${this.baseURL}${endpoint}`;
-    console.log('Uploading file to:', url);
+    console.log('Uploading file to:', this.baseURL + endpoint);
     console.log('Headers:', headers);
     console.log('Additional Data:', additionalData);
 
     try {
-      const response = await fetch(url, {
+      const response = await fetch(this.baseURL + endpoint, {
         method: 'POST',
-        headers,
         body: formData,
+        headers
       });
 
       console.log('Response status:', response.status);
+      
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Upload failed! status: ${response.status}, details: ${errorText}`);
+        const errorData = await response.json();
+        console.log('Error response:', errorData);
+        throw new Error(`Upload failed! status: ${response.status}, details: ${JSON.stringify(errorData)}`);
       }
 
       const data = await response.json();
-      console.log('Response data:', data);
+      console.log('Upload success:', data);
       return data;
     } catch (error) {
       console.error('文件上传失败:', error);
@@ -165,15 +207,47 @@ const apiService = new ApiService()
 
 // 具体的API调用方法
 export const api = {
+    // 获取用户统计信息
+    getUserStats: async () => {
+      interface UserStatsResponse {
+        userCount: number;
+      }
+      
+      try {
+        const response = await apiService.get<UserStatsResponse>(API_ENDPOINTS.AUTH.STATS);
+        return response;
+      } catch (error) {
+        console.error("获取用户统计信息失败:", error);
+        throw error;
+      }
+    },
+    
     // 用户注册
-  register: (username: string, password: string) => {
+  register: async (username: string, password: string) => {
     const url = API_ENDPOINTS.AUTH.REGISTER;
     const body = { username, password };
-    message.info(`POST ${url} \nRequest Body: ${JSON.stringify(body)}`);
-    return apiService.post<{ token: string; user: { id: string; username: string } }>(url, body);
+    try {
+      const response = await apiService.post<{ token: string; user: { id: string; username: string } }>(url, body);
+      
+      if (response.success && response.data) {
+        // 存储到Cookie
+        Cookies.set('token', response.data.token, COOKIE_OPTIONS);
+        Cookies.set('userId', response.data.user.id, COOKIE_OPTIONS);
+        Cookies.set('username', response.data.user.username, COOKIE_OPTIONS);
+        
+        // 同时保留localStorage存储以兼容现有代码
+        localStorage.setItem('token', response.data.token);
+        localStorage.setItem('userId', response.data.user.id);
+        localStorage.setItem('username', response.data.user.username);
+      }
+      
+      return response;
+    } catch (error) {
+      throw error;
+    }
   },
 
-  login: async (username: string, password: string) => {
+  login: async (username: string, password: string, remember: boolean = true) => {
     try {
       const response = await apiService.post<{ token: string; user: { id: string; username: string } }>(
         API_ENDPOINTS.AUTH.LOGIN, 
@@ -181,13 +255,21 @@ export const api = {
       );
       
       if (response.success) {
-        // message.success('登录成功');
+        // 根据"记住我"选项设置Cookie过期时间
+        const cookieOptions = remember ? COOKIE_OPTIONS : { ...COOKIE_OPTIONS, expires: 1 };
+        
+        // 存储到Cookie
+        Cookies.set('token', response.data.token, cookieOptions);
+        Cookies.set('userId', response.data.user.id, cookieOptions);
+        Cookies.set('username', response.data.user.username, cookieOptions);
+        
+        // 同时保留localStorage存储以兼容现有代码
+        localStorage.setItem('token', response.data.token);
+        localStorage.setItem('userId', response.data.user.id);
+        localStorage.setItem('username', response.data.user.username);
+        
         message.info(`欢迎回来，${response.data.user.username}！`);
         console.log('登录成功，存储用户信息:', response.data.user);
-        // 存储token和userId
-        localStorage.setItem('token', response.data.token);
-        localStorage.setItem('userId', response.data.user.id); // 添加这行
-        localStorage.setItem('username', response.data.user.username);
       }
       
       return response;
@@ -208,6 +290,21 @@ export const api = {
       description: description || '' 
     }),
 
+  // 添加水印
+  addWatermark: (params: {
+    avatarFileId: string;
+    watermarkType: string;
+    content: string;
+    options: {
+      position: string;
+      opacity: number;
+      fontSize: number;
+      color: string;
+    }
+  }) => {
+    return apiService.post(API_ENDPOINTS.COPYRIGHT.WATERMARK, params);
+  },
+
   // 预设头像框
   getPresetFrames: (category?: string, page = 1, limit = 20) => {
     const params = new URLSearchParams({
@@ -216,7 +313,7 @@ export const api = {
       ...(category && category !== 'all' && { category })
     })
     const url = `${API_ENDPOINTS.FRAMES.PRESET_LIST}?${params.toString()}`;
-    message.info(`请求 URL: ${url}`);
+    // message.info(`请求 URL: ${url}`);
     return apiService.get<{ frames: Frame[], total: number, page: number, limit: number }>(
       `${API_ENDPOINTS.FRAMES.PRESET_LIST}?${params}`
     )
@@ -244,14 +341,47 @@ export const api = {
     );
   },
 
-  deleteCustomFrame: (frameId: string) => 
-    apiService.delete(API_ENDPOINTS.FRAMES.CUSTOM_DELETE(frameId)),
+  // 删除自定义头像框 - 确保函数名和参数正确
+  deleteCustomFrame: (frameId: string, userId?: string) => {
+    console.log('API调用 deleteCustomFrame:', { frameId, userId: userId || localStorage.getItem('userId') });
+    return apiService.delete<{ deletedFrame: any, fileDeleteResults: any[] }>(
+      API_ENDPOINTS.FRAMES.CUSTOM_DELETE(frameId),
+      {
+        data: { 
+          userId: userId || localStorage.getItem('userId') 
+        }
+      }
+    );
+  },
 
-  // AI处理功能 - 头像超分 (暂未实现，保持原样)
-  superResolution: (avatarFileId: string, scaleFactor: number, quality: string) =>
-    apiService.post<{ resultUrl: string }>(
+  // 批量删除自定义头像框
+  deleteMultipleCustomFrames: (frameIds: string[], userId?: string) => {
+    console.log('API调用 deleteMultipleCustomFrames:', { frameIds, userId: userId || localStorage.getItem('userId') });
+    return apiService.delete<{ 
+      deletedCount: number, 
+      deletedFrames: any[], 
+      fileDeleteResults: any[] 
+    }>(
+      '/frames/custom/batch',
+      {
+        data: { 
+          frameIds, 
+          userId: userId || localStorage.getItem('userId') 
+        }
+      }
+    );
+  },
+
+  // AI处理功能 - 头像超分
+  superResolution: (avatarFileId: string, scaleFactor: number = 2, quality: string = 'high', userId?: string) =>
+    apiService.post<{ resultUrl: string, taskId?: string, status: string }>(
       API_ENDPOINTS.AI.SUPER_RESOLUTION,
-      { avatarFileId, scaleFactor, quality }
+      { 
+        avatarFileId, 
+        scaleFactor, 
+        quality,
+        userId: userId || localStorage.getItem('userId')
+      }
     ),
 
   // 获取艺术风格列表
@@ -269,7 +399,10 @@ export const api = {
         userId: userId || localStorage.getItem('userId') // 从localStorage获取或传入
       }
     ),
-
+    // 获取可用风格列表
+  getStylesList(): Promise<any> {
+    return apiService.get('/ai/styles')
+  },
   // 文本生成图像 - 修改参数以匹配后端
   textToImage: (text: string, width = 1024, height = 1024, model = 'dall-e-3', quality = 'standard', userId?: string) => 
     apiService.post<{ taskId: string, resultUrl: string }>(
@@ -336,13 +469,6 @@ export const api = {
     )
   },
 
-  // 版权保护
-  addWatermark: (avatarFileId: string, watermarkType: string, content: string, options = {}) => 
-    apiService.post<{ taskId: string, resultUrl: string, status: string }>(
-      API_ENDPOINTS.COPYRIGHT.WATERMARK,
-      { avatarFileId, watermarkType, content, options }
-    ),
-
   detectWatermark: (imageFileId: string) => 
     apiService.post<{ hasWatermark: boolean, watermarkInfo?: any }>(
       API_ENDPOINTS.COPYRIGHT.DETECT,
@@ -387,9 +513,105 @@ export const api = {
       API_ENDPOINTS.SYSTEM.STATUS
     ),
 
-  getUserStats: () => 
+  // 获取用户配额/统计信息（处理次数、剩余额度等）
+  getUserQuotaStats: () => 
     apiService.get<{ totalProcessed: number, todayProcessed: number, remainingQuota: number, favoriteEffects: string[] }>(
       API_ENDPOINTS.SYSTEM.USER_STATS
+    ),
+
+  // 获取超分辨率历史记录
+  getSuperResolutionHistory: (page = 1, limit = 10, userId?: string) => 
+    apiService.get<{ records: any[], total: number, page: number, totalPages: number }>(
+      `${API_ENDPOINTS.AI.SUPER_RESOLUTION}/history`,
+      { 
+        params: { 
+          userId: userId || localStorage.getItem('userId'), 
+          page, 
+          limit 
+        } 
+      }
+    ),
+
+  // 获取风格迁移历史记录
+  getStyleTransferHistory: (page = 1, limit = 10, userId?: string) => 
+    apiService.get<{ records: any[], total: number, page: number, totalPages: number }>(
+      `${API_ENDPOINTS.AI.STYLE_TRANSFER}/history`,
+      { 
+        params: { 
+          userId: userId || localStorage.getItem('userId'), 
+          page, 
+          limit 
+        } 
+      }
+    ),
+
+  // 获取背景模糊历史记录
+  getBackgroundBlurHistory: (page = 1, limit = 10, userId?: string) => 
+    apiService.get<{ records: any[], total: number, page: number, totalPages: number }>(
+      `${API_ENDPOINTS.AI.BACKGROUND_BLUR}/history`,
+      { 
+        params: { 
+          userId: userId || localStorage.getItem('userId'), 
+          page, 
+          limit 
+        } 
+      }
+    ),
+
+  // 获取背景替换历史记录
+  getBackgroundReplaceHistory: (page = 1, limit = 10, userId?: string) => 
+    apiService.get<{ records: any[], total: number, page: number, totalPages: number }>(
+      `${API_ENDPOINTS.AI.BACKGROUND_REPLACE}/history`,
+      { 
+        params: { 
+          userId: userId || localStorage.getItem('userId'), 
+          page, 
+          limit 
+        } 
+      }
+    ),
+
+  // 删除单个AI记录
+  deleteAIRecord: (recordId: string, userId?: string) => 
+    apiService.delete<{ deletedRecord: any }>(
+      API_ENDPOINTS.AI.DELETE_RECORD(recordId),
+      {
+        data: { 
+          userId: userId || localStorage.getItem('userId') 
+        }
+      }
+    ),
+
+  // 批量删除AI记录
+  deleteMultipleAIRecords: (recordIds: string[], userId?: string) => 
+    apiService.delete<{ 
+      deletedCount: number, 
+      deletedRecords: any[], 
+      fileDeleteResults: any[] 
+    }>(
+      API_ENDPOINTS.AI.DELETE_BATCH,
+      {
+        data: { 
+          recordIds, 
+          userId: userId || localStorage.getItem('userId') 
+        }
+      }
+    ),
+
+  // 删除所有AI记录
+  deleteAllAIRecords: (taskType?: string, userId?: string) => 
+    apiService.delete<{ 
+      deletedCount: number, 
+      taskType: string, 
+      fileDeleteResults: any[] 
+    }>(
+      API_ENDPOINTS.AI.DELETE_ALL,
+      {
+        data: { 
+          taskType, 
+          userId: userId || localStorage.getItem('userId') 
+        }
+      }
     ),
 }
 

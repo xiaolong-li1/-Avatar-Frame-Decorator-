@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Upload, message } from 'antd';
+import { Upload, message, Spin } from 'antd';
 import { InboxOutlined } from '@ant-design/icons';
 import type { UploadProps } from 'antd';
 import { api } from '../services/api'; // 确保路径正确，指向你的 api 服务
@@ -47,7 +47,7 @@ const AvatarUpload: React.FC<AvatarUploadProps> = ({
       // 上传文件到后端
       setUploading(true);
       try {
-        const response = await api.uploadAvatar(file);
+        const response: any = await api.uploadAvatar(file);
         const { fileId, originalUrl } = response.data; // 根据 UploadResponse 结构提取字段
         onImageChange({ fileId, url: originalUrl });
         message.success('头像上传成功！');
@@ -57,24 +57,40 @@ const AvatarUpload: React.FC<AvatarUploadProps> = ({
       } finally {
         setUploading(false);
       }
-
-      return false; // 阻止默认上传
-    },
-    onDrop(e) {
-      console.log('Dropped files', e.dataTransfer.files);
     },
   };
 
   return (
-    <Dragger {...uploadProps} style={{ padding: '20px' }} disabled={uploading}>
-      <p className="ant-upload-drag-icon">
-        <InboxOutlined />
-      </p>
-      <p className="ant-upload-text">点击或拖拽图片到此区域上传</p>
-      <p className="ant-upload-hint">
-        支持 JPG、PNG、WebP 格式，文件大小不超过 {maxSize}MB
-      </p>
-    </Dragger>
+    <div style={{ position: 'relative', padding: '20px' }}>
+      <Dragger {...uploadProps} disabled={uploading}>
+        <p className="ant-upload-drag-icon">
+          <InboxOutlined />
+        </p>
+        <p className="ant-upload-text">点击或拖拽图片到此区域上传</p>
+        <p className="ant-upload-hint">
+          支持 JPG、PNG、WebP 格式，文件大小不超过 {maxSize}MB
+        </p>
+      </Dragger>
+
+      {uploading && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            background: 'rgba(255,255,255,0.8)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Spin tip="上传中..." />
+        </div>
+      )}
+    </div>
   );
 };
 
