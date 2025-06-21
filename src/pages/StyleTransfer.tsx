@@ -1,9 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Card, Row, Col, Button, Typography, Space, message, Spin, Modal } from 'antd'
+import { Card, Row, Col, Button, Typography, Space, message, Spin, Modal, Divider } from 'antd'
 import { BgColorsOutlined, DownloadOutlined, LoadingOutlined, ShareAltOutlined, HistoryOutlined } from '@ant-design/icons'
 import AvatarUpload from '../components/AvatarUpload'
 import api from '../services/api'
 import { handleApiError } from '../services/api'
+import { useAITask } from '../contexts/AITaskContext'
+import usePersistedState from '../hooks/usePersistedState'
+
+// 导入风格图片
+import style1 from '../assets/style_1.png'
+import style2 from '../assets/style_2.png'
+import style3 from '../assets/style_3.png'
+import style4 from '../assets/style_4.png'
+import style5 from '../assets/style_5.png'
+import style6 from '../assets/style_6.png'
 
 const { Title, Paragraph } = Typography
 
@@ -17,6 +27,7 @@ interface StyleTemplate {
   name: string
   artist: string
   description: string
+  image?: string // 添加图片属性
 }
 
 interface StyleResult {
@@ -25,10 +36,9 @@ interface StyleResult {
 }
 
 const StyleTransfer: React.FC = () => {
-  const [userAvatar, setUserAvatar] = useState<AvatarData | null>(null)
+  const [userAvatar, setUserAvatar] = usePersistedState<AvatarData | null>('style-transfer-avatar', null)
   const [selectedStyle, setSelectedStyle] = useState<StyleTemplate | null>(null)
   const [styleResult, setStyleResult] = useState<StyleResult | null>(null)
-  const [isProcessing, setIsProcessing] = useState(false)
   const [availableStyles, setAvailableStyles] = useState<StyleTemplate[]>([])
   const [isLoadingStyles, setIsLoadingStyles] = useState(true)
   const [shareModalVisible, setShareModalVisible] = useState(false)
@@ -38,46 +48,56 @@ const StyleTransfer: React.FC = () => {
     expiresAt: string
   } | null>(null)
 
+  // 使用AI任务管理
+  const { startTask, getTasksByType, isTaskRunning } = useAITask()
+  const isProcessing = isTaskRunning('style-transfer')
+
   // 使用 useRef 来追踪当前请求
   const currentRequestRef = useRef<AbortController | null>(null)
 
-  // 硬编码的风格模板（与后端保持一致）
+  // 硬编码的风格模板（与后端保持一致）- 添加图片映射
   const defaultStyles: StyleTemplate[] = [
     {
       id: 'vangogh_starry',
       name: '星空',
       artist: '梵高',
-      description: '梵高经典作品《星空》风格'
+      description: '梵高经典作品《星空》风格',
+      image: style1
     },
     {
       id: 'monet_water',
       name: '水莲',
       artist: '莫奈',
-      description: '莫奈印象派水莲系列风格'
+      description: '莫奈印象派水莲系列风格',
+      image: style2
     },
     {
       id: 'picasso_abstract',
       name: '立体派',
       artist: '毕加索',
-      description: '毕加索立体主义抽象风格'
+      description: '毕加索立体主义抽象风格',
+      image: style3
     },
     {
       id: 'chinese_ink',
       name: '水墨画',
       artist: '中式传统',
-      description: '中国传统水墨画风格'
+      description: '中国传统水墨画风格',
+      image: style4
     },
     {
       id: 'oil_painting',
       name: '古典油画',
       artist: '欧洲古典',
-      description: '欧洲古典油画风格'
+      description: '欧洲古典油画风格',
+      image: style5
     },
     {
       id: 'watercolor',
       name: '水彩画',
       artist: '现代水彩',
-      description: '清新水彩画风格'
+      description: '清新水彩画风格',
+      image: style6
     }
   ]
 
@@ -87,7 +107,15 @@ const StyleTransfer: React.FC = () => {
       try {
         const response = await api.getStylesList()
         if (response.success && response.data?.styles) {
-          setAvailableStyles(response.data.styles)
+          // 将API返回的风格与默认图片合并
+          const stylesWithImages = response.data.styles.map((style: StyleTemplate) => {
+            const defaultStyle = defaultStyles.find(ds => ds.id === style.id)
+            return {
+              ...style,
+              image: defaultStyle?.image
+            }
+          })
+          setAvailableStyles(stylesWithImages)
         } else {
           // 如果API失败，使用默认风格
           setAvailableStyles(defaultStyles)
@@ -102,6 +130,19 @@ const StyleTransfer: React.FC = () => {
 
     loadStyles()
   }, [])
+
+  // 检查是否有已完成的风格迁移任务
+  useEffect(() => {
+    const tasks = getTasksByType('style-transfer')
+    const completedTask = tasks.find(task => task.status === 'completed')
+    
+    if (completedTask && completedTask.result?.resultUrl) {
+      setStyleResult({
+        resultUrl: completedTask.result.resultUrl,
+        taskId: completedTask.id
+      })
+    }
+  }, [getTasksByType])
 
   // 处理头像上传
   const handleAvatarChange = (data: AvatarData) => {
@@ -128,107 +169,20 @@ const StyleTransfer: React.FC = () => {
     }
 
     if (isProcessing) {
-      console.log('正在处理中，跳过重复请求')
+      message.info('已有风格迁移任务正在处理中，请稍候...')
       return
     }
 
-    // 取消之前的请求
-    if (currentRequestRef.current) {
-      currentRequestRef.current.abort()
-    }
-
-    setIsProcessing(true)
-    let isPollingMode = false // 标记是否进入轮询模式
-
     try {
-      console.log('应用风格迁移 - 参数:', {
-        avatarFileId: userAvatar.fileId,
+      const taskId = await startTask('style-transfer', {
+        fileId: userAvatar.fileId,
         styleId: selectedStyle.id
       })
 
-      // 调用API应用风格迁移
-      const response = await api.styleTransfer(userAvatar.fileId, selectedStyle.id)
-      
-      console.log('风格迁移 - 响应:', response)
-
-      if (response.success && response.data) {
-        if (response.data.resultUrl) {
-          // 直接返回了结果URL - 立即显示
-          setStyleResult({ resultUrl: response.data.resultUrl, taskId: response.data.taskId })
-          message.success(`${selectedStyle.name}风格应用成功！`)
-          // 直接完成，不进入轮询模式
-        } else if (response.data.taskId) {
-          // 返回的是任务ID - 需要轮询任务状态
-          isPollingMode = true // 标记进入轮询模式
-          message.info('图片处理中，请稍候...')
-          
-          const taskId = response.data.taskId
-          let pollCount = 0
-          
-          const checkTaskStatus = async () => {
-            if (pollCount > 30) { // 最多轮询30次
-              setIsProcessing(false)
-              message.error('处理超时，请重试')
-              return
-            }
-
-            try {
-              console.log(`轮询任务状态 #${pollCount} - 任务ID: ${taskId}`)
-              const statusRes = await api.getTaskStatus(taskId)
-              
-              if (statusRes.success && statusRes.data) {
-                console.log(`任务状态: ${statusRes.data.status}`)
-                
-                if (statusRes.data.status === 'completed' && statusRes.data.resultUrl) {
-                  setStyleResult({ resultUrl: statusRes.data.resultUrl, taskId })
-                  setIsProcessing(false)
-                  message.success(`${selectedStyle.name}风格应用成功！`)
-                } else if (statusRes.data.status === 'failed') {
-                  setIsProcessing(false)
-                  message.error(`处理失败: ${statusRes.data.error || '未知错误'}`)
-                } else if (statusRes.data.status === 'processing') {
-                  pollCount++
-                  setTimeout(checkTaskStatus, 2000) // 每2秒轮询一次
-                } else {
-                  pollCount++
-                  setTimeout(checkTaskStatus, 2000)
-                }
-              } else {
-                throw new Error(statusRes.message || '获取任务状态失败')
-              }
-            } catch (err) {
-              console.error('轮询任务状态失败:', err)
-              setIsProcessing(false)
-              message.error('获取处理状态失败，请重试')
-            }
-          }
-          
-          checkTaskStatus()
-        } else {
-          throw new Error('服务器响应缺少必要数据')
-        }
-      } else {
-        throw new Error(response.message || '风格迁移处理失败')
-      }
+      console.log('风格迁移任务已启动:', taskId)
     } catch (error) {
-      console.error('风格迁移处理出错:', error)
-      
-      // 特殊处理AbortError
-      if (error instanceof Error && error.name === 'AbortError') {
-        console.log('请求被中止，可能是用户取消或超时')
-        message.warning('请求已取消')
-      } else {
-        message.error('风格迁移处理失败，请重试')
-      }
-      
-      // 出错时重置状态
-      setIsProcessing(false)
-    } finally {
-      // 只有在非轮询模式下才在这里重置状态
-      if (!isPollingMode) {
-        setIsProcessing(false)
-      }
-      currentRequestRef.current = null
+      console.error('启动风格迁移任务失败:', error)
+      handleApiError(error)
     }
   }
 
@@ -237,7 +191,6 @@ const StyleTransfer: React.FC = () => {
     if (currentRequestRef.current) {
       currentRequestRef.current.abort()
     }
-    setIsProcessing(false)
     message.info('已取消操作')
   }
 
@@ -332,177 +285,85 @@ const StyleTransfer: React.FC = () => {
       </Paragraph>
 
       <Row gutter={[24, 24]}>
+        {/* 左侧：上传和风格选择 */}
         <Col xs={24} lg={8}>
-          <Card title="上传头像" style={{ marginBottom: '16px', position: 'relative' }}>
+          <Card title="上传头像" style={{ marginBottom: '24px' }}>
             {!userAvatar ? (
               <AvatarUpload onImageChange={handleAvatarChange} />
             ) : (
               <div style={{ textAlign: 'center' }}>
-                <div className="avatar-preview" style={{ 
-                  width: '200px', 
-                  height: '200px', 
+                <div style={{
+                  width: '200px',
+                  height: '200px',
                   margin: '0 auto 16px',
-                  position: 'relative'
+                  border: '2px solid #e8e8e8',
+                  borderRadius: '8px',
+                  overflow: 'hidden',
+                  backgroundColor: '#fafafa',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
                 }}>
                   <img 
-                    src={styleResult?.resultUrl || userAvatar.url} 
-                    alt="头像预览" 
+                    src={userAvatar.url} 
+                    alt="用户头像" 
                     style={{ 
-                      width: '100%', 
-                      height: '100%', 
-                      objectFit: 'cover',
-                      borderRadius: '8px'
+                      maxWidth: '100%', 
+                      maxHeight: '100%', 
+                      objectFit: 'cover'
                     }}
                   />
-                  {isProcessing && (
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        width: '100%',
-                        height: '100%',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        background: 'rgba(0,0,0,0.7)',
-                        borderRadius: '8px',
-                      }}
-                    >
-                      <Spin indicator={<LoadingOutlined style={{ fontSize: 24, color: '#fff' }} spin />} />
-                      <span style={{ color: '#fff', marginTop: '8px', fontSize: '12px' }}>处理中...</span>
-                    </div>
-                  )}
                 </div>
-                <Space>
+                
+                <Space direction="vertical" size="small" style={{ width: '100%' }}>
                   <Button 
-                    type="primary" 
-                    icon={<BgColorsOutlined />}
-                    onClick={applyStyle}
-                    disabled={!selectedStyle || isProcessing}
-                    loading={isProcessing}
-                  >
-                    应用风格
-                  </Button>
-                  <Button 
-                    icon={<DownloadOutlined />}
-                    onClick={handleDownload}
-                    disabled={!styleResult?.resultUrl}
-                  >
-                    下载头像
-                  </Button>
-                  <Button 
-                    icon={<ShareAltOutlined />}
-                    onClick={handleShare}
-                    disabled={!styleResult?.resultUrl}
-                  >
-                    分享到微信
-                  </Button>
-                </Space>
-                <div style={{ marginTop: '8px' }}>
-                  <Button 
-                    size="small" 
-                    onClick={() => {
-                      setUserAvatar(null)
-                      setStyleResult(null)
-                      setSelectedStyle(null)
-                    }}
+                    type="text" 
+                    size="small"
+                    onClick={() => setUserAvatar(null)}
                   >
                     重新上传
                   </Button>
-                  {isProcessing && (
-                    <Button 
-                      size="small" 
-                      onClick={cancelOperation}
-                      style={{ marginLeft: '8px' }}
-                    >
-                      取消处理
-                    </Button>
+                </Space>
+
+                <Divider />
+                
+                <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                  <Button
+                    type="primary"
+                    size="large"
+                    icon={isProcessing ? <LoadingOutlined /> : <BgColorsOutlined />}
+                    onClick={applyStyle}
+                    disabled={isProcessing || !selectedStyle}
+                    style={{ width: '100%' }}
+                  >
+                    {isProcessing ? '风格迁移中...' : '应用艺术风格'}
+                  </Button>
+                  
+                  {styleResult?.resultUrl && (
+                    <Space size="small" style={{ width: '100%' }}>
+                      <Button
+                        type="default"
+                        icon={<DownloadOutlined />}
+                        onClick={handleDownload}
+                        style={{ flex: 1 }}
+                      >
+                        下载
+                      </Button>
+                      <Button
+                        type="default"
+                        icon={<ShareAltOutlined />}
+                        onClick={handleShare}
+                        style={{ flex: 1 }}
+                      >
+                        分享
+                      </Button>
+                    </Space>
                   )}
-                </div>
+                </Space>
               </div>
             )}
           </Card>
 
-          {selectedStyle && (
-            <Card title="当前风格" style={{ marginBottom: '16px' }}>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontWeight: 'bold', fontSize: '16px' }}>{selectedStyle.name}</div>
-                <div style={{ color: '#666', fontSize: '14px', marginBottom: '8px' }}>
-                  {selectedStyle.artist}
-                </div>
-                <Paragraph type="secondary" style={{ fontSize: '12px' }}>
-                  {selectedStyle.description}
-                </Paragraph>
-              </div>
-            </Card>
-          )}
-
-          {/* 预览效果卡片 - 确保在当前风格卡片下面 */}
-          {styleResult?.resultUrl && (
-            <Card title="风格效果对比" style={{ marginBottom: '16px' }}>
-              <Row gutter={[8, 8]}>
-                <Col span={12}>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: '12px', marginBottom: '8px', color: '#666' }}>原图</div>
-                    <div style={{ 
-                      width: '100%', 
-                      height: '100px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      overflow: 'hidden',
-                      borderRadius: '4px',
-                      backgroundColor: '#f5f5f5'
-                    }}>
-                      <img 
-                        src={userAvatar?.url} 
-                        alt="原图" 
-                        style={{ 
-                          maxWidth: '100%', 
-                          maxHeight: '100%', 
-                          objectFit: 'contain',
-                          borderRadius: '4px'
-                        }}
-                      />
-                    </div>
-                  </div>
-                </Col>
-                <Col span={12}>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: '12px', marginBottom: '8px', color: '#666' }}>
-                      {selectedStyle?.name}风格
-                    </div>
-                    <div style={{ 
-                      width: '100%', 
-                      height: '100px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      overflow: 'hidden',
-                      borderRadius: '4px',
-                      backgroundColor: '#f5f5f5'
-                    }}>
-                      <img 
-                        src={styleResult.resultUrl} 
-                        alt="风格化效果" 
-                        style={{ 
-                          maxWidth: '100%', 
-                          maxHeight: '100%', 
-                          objectFit: 'contain',
-                          borderRadius: '4px'
-                        }}
-                      />
-                    </div>
-                  </div>
-                </Col>
-              </Row>
-            </Card>
-          )}
-        </Col>
-
-        <Col xs={24} lg={16}>
           <Card 
             title="选择艺术风格" 
             loading={isLoadingStyles}
@@ -510,14 +371,16 @@ const StyleTransfer: React.FC = () => {
               <Button 
                 icon={<HistoryOutlined />} 
                 onClick={() => window.open('/ai-history', '_blank')}
+                size="small"
               >
-                查看历史
+                历史记录
               </Button>
             }
+            style={{ marginBottom: '24px' }}
           >
-            <Row gutter={[16, 16]}>
+            <Row gutter={[12, 12]}>
               {availableStyles.map(style => (
-                <Col xs={12} sm={8} md={6} key={style.id}>
+                <Col xs={12} key={style.id}>
                   <Card
                     hoverable
                     style={{ 
@@ -525,32 +388,46 @@ const StyleTransfer: React.FC = () => {
                       border: selectedStyle?.id === style.id ? '2px solid #1890ff' : '1px solid #d9d9d9',
                       cursor: 'pointer'
                     }}
-                    bodyStyle={{ padding: '12px' }}
+                    bodyStyle={{ padding: '8px' }}
                     onClick={() => handleStyleSelect(style)}
                   >
                     <div style={{ 
-                      width: '80px', 
+                      width: '100%', 
                       height: '60px', 
                       backgroundColor: '#f5f5f5',
-                      borderRadius: '6px',
+                      borderRadius: '4px',
                       margin: '0 auto 8px',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      fontSize: '12px',
-                      color: '#999'
+                      overflow: 'hidden'
                     }}>
-                      {style.name}
+                      {style.image ? (
+                        <img 
+                          src={style.image} 
+                          alt={style.name}
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                            borderRadius: '4px'
+                          }}
+                        />
+                      ) : (
+                        <span style={{ fontSize: '10px', color: '#999' }}>
+                          {style.name}
+                        </span>
+                      )}
                     </div>
                     <div style={{ 
-                      fontSize: '12px', 
+                      fontSize: '11px', 
                       fontWeight: 'bold',
-                      marginBottom: '4px'
+                      marginBottom: '2px'
                     }}>
                       {style.name}
                     </div>
                     <div style={{ 
-                      fontSize: '10px', 
+                      fontSize: '9px', 
                       color: '#666'
                     }}>
                       {style.artist}
@@ -559,13 +436,799 @@ const StyleTransfer: React.FC = () => {
                 </Col>
               ))}
             </Row>
+
+            {/* 使用提示 */}
+            <div style={{ 
+              marginTop: '16px',
+              padding: '12px',
+              backgroundColor: '#f8f9fa',
+              borderRadius: '6px',
+              border: '1px solid #e9ecef'
+            }}>
+              <div style={{ 
+                fontWeight: 'bold', 
+                color: '#1890ff', 
+                marginBottom: '8px',
+                fontSize: '14px'
+              }}>
+                💡 使用提示
+              </div>
+              <ul style={{ 
+                margin: 0, 
+                paddingLeft: '16px',
+                fontSize: '12px',
+                color: '#666',
+                lineHeight: '1.5'
+              }}>
+                <li>选择您喜欢的艺术风格</li>
+                <li>处理时间：2-5分钟</li>
+                <li>建议使用清晰的头像照片</li>
+              </ul>
+            </div>
           </Card>
+        </Col>
+
+        {/* 右侧：效果展示 */}
+        <Col xs={24} lg={16}>
+          {styleResult?.resultUrl ? (
+            /* 有结果时显示对比效果 */
+            <Card 
+              title={
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <BgColorsOutlined style={{ color: '#1890ff' }} />
+                  <span>艺术风格效果对比</span>
+                  {selectedStyle && (
+                    <span style={{ 
+                      fontSize: '12px', 
+                      color: '#1890ff',
+                      backgroundColor: '#e6f7ff',
+                      padding: '2px 8px',
+                      borderRadius: '10px'
+                    }}>
+                      {selectedStyle.name}风格
+                    </span>
+                  )}
+                </div>
+              }
+            >
+              <Row gutter={[24, 24]} style={{ marginBottom: '24px' }}>
+                <Col xs={24} sm={12}>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ 
+                      fontSize: '16px', 
+                      fontWeight: 'bold',
+                      marginBottom: '12px', 
+                      color: '#666',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px'
+                    }}>
+                      <span>原图</span>
+                    </div>
+                    <div style={{
+                      width: '100%',
+                      height: '280px',
+                      border: '2px solid #e8e8e8',
+                      borderRadius: '8px',
+                      overflow: 'hidden',
+                      backgroundColor: '#fafafa',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      transition: 'all 0.3s ease'
+                    }}
+                    onClick={() => {
+                      // 风格对比预览模态框
+                      Modal.info({
+                        title: (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <BgColorsOutlined />
+                            <span>艺术风格效果对比</span>
+                            {selectedStyle && (
+                              <span style={{ 
+                                fontSize: '12px', 
+                                color: '#1890ff',
+                                backgroundColor: '#e6f7ff',
+                                padding: '2px 8px',
+                                borderRadius: '10px'
+                              }}>
+                                {selectedStyle.name}风格
+                              </span>
+                            )}
+                          </div>
+                        ),
+                        width: '90%',
+                        style: { maxWidth: '1200px', top: 20 },
+                        content: (
+                          <div>
+                            <Row gutter={[24, 16]}>
+                              <Col xs={24} md={12}>
+                                <div style={{ textAlign: 'center' }}>
+                                  <div style={{ 
+                                    fontSize: '16px', 
+                                    fontWeight: 'bold',
+                                    marginBottom: '12px', 
+                                    color: '#666'
+                                  }}>
+                                    原图
+                                  </div>
+                                  <div style={{
+                                    border: '2px solid #e8e8e8',
+                                    borderRadius: '8px',
+                                    overflow: 'hidden',
+                                    backgroundColor: '#fafafa',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    minHeight: '400px'
+                                  }}>
+                                    <img 
+                                      src={userAvatar?.url} 
+                                      alt="原图" 
+                                      style={{ 
+                                        maxWidth: '100%', 
+                                        maxHeight: '400px',
+                                        objectFit: 'contain'
+                                      }} 
+                                    />
+                                  </div>
+                                </div>
+                              </Col>
+                              <Col xs={24} md={12}>
+                                <div style={{ textAlign: 'center' }}>
+                                  <div style={{ 
+                                    fontSize: '16px', 
+                                    fontWeight: 'bold',
+                                    marginBottom: '12px', 
+                                    color: '#1890ff',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '8px'
+                                  }}>
+                                    <BgColorsOutlined />
+                                    <span>{selectedStyle?.name}风格</span>
+                                  </div>
+                                  <div style={{
+                                    border: '3px solid #1890ff',
+                                    borderRadius: '8px',
+                                    overflow: 'hidden',
+                                    backgroundColor: '#fafafa',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    minHeight: '400px',
+                                    boxShadow: '0 4px 16px rgba(24, 144, 255, 0.15)'
+                                  }}>
+                                    <img 
+                                      src={styleResult.resultUrl} 
+                                      alt="风格迁移结果" 
+                                      style={{ 
+                                        maxWidth: '100%', 
+                                        maxHeight: '400px',
+                                        objectFit: 'contain'
+                                      }} 
+                                    />
+                                  </div>
+                                </div>
+                              </Col>
+                            </Row>
+                            
+                            {/* 风格信息 */}
+                            <div style={{ 
+                              marginTop: '20px',
+                              padding: '16px',
+                              backgroundColor: '#f6ffed',
+                              border: '1px solid #b7eb8f',
+                              borderRadius: '8px'
+                            }}>
+                              <Row gutter={[16, 8]}>
+                                <Col span={6}>
+                                  <div style={{ textAlign: 'center' }}>
+                                    <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#1890ff' }}>
+                                      {selectedStyle?.name}
+                                    </div>
+                                    <div style={{ fontSize: '12px', color: '#666' }}>艺术风格</div>
+                                  </div>
+                                </Col>
+                                <Col span={6}>
+                                  <div style={{ textAlign: 'center' }}>
+                                    <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#52c41a' }}>
+                                      {selectedStyle?.artist}
+                                    </div>
+                                    <div style={{ fontSize: '12px', color: '#666' }}>艺术家</div>
+                                  </div>
+                                </Col>
+                                <Col span={6}>
+                                  <div style={{ textAlign: 'center' }}>
+                                    <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#fa541c' }}>
+                                      AI
+                                    </div>
+                                    <div style={{ fontSize: '12px', color: '#666' }}>智能迁移</div>
+                                  </div>
+                                </Col>
+                                <Col span={6}>
+                                  <div style={{ textAlign: 'center' }}>
+                                    <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#722ed1' }}>
+                                      HD
+                                    </div>
+                                    <div style={{ fontSize: '12px', color: '#666' }}>高清重建</div>
+                                  </div>
+                                </Col>
+                              </Row>
+                            </div>
+
+                            {/* 风格描述 */}
+                            {selectedStyle?.description && (
+                              <div style={{ 
+                                marginTop: '16px',
+                                padding: '12px',
+                                backgroundColor: '#f0f9ff',
+                                borderRadius: '6px',
+                                fontSize: '14px',
+                                color: '#1890ff',
+                                textAlign: 'center'
+                              }}>
+                                {selectedStyle.description}
+                              </div>
+                            )}
+                            
+                            {/* 操作按钮 */}
+                            <div style={{ 
+                              marginTop: '20px',
+                              textAlign: 'center'
+                            }}>
+                              <Space size="middle">
+                                <Button
+                                  type="primary"
+                                  icon={<DownloadOutlined />}
+                                  onClick={handleDownload}
+                                  size="large"
+                                >
+                                  下载艺术风格头像
+                                </Button>
+                                <Button
+                                  icon={<ShareAltOutlined />}
+                                  onClick={handleShare}
+                                  size="large"
+                                >
+                                  分享作品
+                                </Button>
+                              </Space>
+                            </div>
+                          </div>
+                        ),
+                        okText: '关闭',
+                        okButtonProps: { size: 'large' }
+                      });
+                    }}
+                    >
+                      <img 
+                        src={userAvatar?.url} 
+                        alt="原图" 
+                        style={{ 
+                          maxWidth: '100%', 
+                          maxHeight: '100%', 
+                          objectFit: 'contain'
+                        }}
+                      />
+                    </div>
+                    <div style={{ 
+                      marginTop: '8px', 
+                      fontSize: '12px', 
+                      color: '#999' 
+                    }}>
+                      点击查看对比预览
+                    </div>
+                  </div>
+                </Col>
+                
+                <Col xs={24} sm={12}>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ 
+                      fontSize: '16px', 
+                      fontWeight: 'bold',
+                      marginBottom: '12px', 
+                      color: '#1890ff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px'
+                    }}>
+                      <BgColorsOutlined />
+                      <span>{selectedStyle?.name}风格</span>
+                    </div>
+                    <div style={{
+                      width: '100%',
+                      height: '280px',
+                      border: '3px solid #1890ff',
+                      borderRadius: '8px',
+                      overflow: 'hidden',
+                      backgroundColor: '#fafafa',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      boxShadow: '0 4px 16px rgba(24, 144, 255, 0.15)',
+                      transition: 'all 0.3s ease'
+                    }}
+                    onClick={() => {
+                      // 同样的对比预览
+                      Modal.info({
+                        title: (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <BgColorsOutlined />
+                            <span>艺术风格效果对比</span>
+                            {selectedStyle && (
+                              <span style={{ 
+                                fontSize: '12px', 
+                                color: '#1890ff',
+                                backgroundColor: '#e6f7ff',
+                                padding: '2px 8px',
+                                borderRadius: '10px'
+                              }}>
+                                {selectedStyle.name}风格
+                              </span>
+                            )}
+                          </div>
+                        ),
+                        width: '90%',
+                        style: { maxWidth: '1200px', top: 20 },
+                        content: (
+                          // 同样的内容...
+                          <div>
+                            <Row gutter={[24, 16]}>
+                              <Col xs={24} md={12}>
+                                <div style={{ textAlign: 'center' }}>
+                                  <div style={{ 
+                                    fontSize: '16px', 
+                                    fontWeight: 'bold',
+                                    marginBottom: '12px', 
+                                    color: '#666'
+                                  }}>
+                                    原图
+                                  </div>
+                                  <div style={{
+                                    border: '2px solid #e8e8e8',
+                                    borderRadius: '8px',
+                                    overflow: 'hidden',
+                                    backgroundColor: '#fafafa',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    minHeight: '400px'
+                                  }}>
+                                    <img 
+                                      src={userAvatar?.url} 
+                                      alt="原图" 
+                                      style={{ 
+                                        maxWidth: '100%', 
+                                        maxHeight: '400px',
+                                        objectFit: 'contain'
+                                      }} 
+                                    />
+                                  </div>
+                                </div>
+                              </Col>
+                              <Col xs={24} md={12}>
+                                <div style={{ textAlign: 'center' }}>
+                                  <div style={{ 
+                                    fontSize: '16px', 
+                                    fontWeight: 'bold',
+                                    marginBottom: '12px', 
+                                    color: '#1890ff',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '8px'
+                                  }}>
+                                    <BgColorsOutlined />
+                                    <span>{selectedStyle?.name}风格</span>
+                                  </div>
+                                  <div style={{
+                                    border: '3px solid #1890ff',
+                                    borderRadius: '8px',
+                                    overflow: 'hidden',
+                                    backgroundColor: '#fafafa',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    minHeight: '400px',
+                                    boxShadow: '0 4px 16px rgba(24, 144, 255, 0.15)'
+                                  }}>
+                                    <img 
+                                      src={styleResult.resultUrl} 
+                                      alt="风格迁移结果" 
+                                      style={{ 
+                                        maxWidth: '100%', 
+                                        maxHeight: '400px',
+                                        objectFit: 'contain'
+                                      }} 
+                                    />
+                                  </div>
+                                </div>
+                              </Col>
+                            </Row>
+                            
+                            {/* 风格信息等其他内容... */}
+                          </div>
+                        ),
+                        okText: '关闭',
+                        okButtonProps: { size: 'large' }
+                      });
+                    }}
+                    >
+                      <img 
+                        src={styleResult.resultUrl} 
+                        alt="风格迁移效果" 
+                        style={{ 
+                          maxWidth: '100%', 
+                          maxHeight: '100%', 
+                          objectFit: 'contain'
+                        }}
+                      />
+                    </div>
+                    <div style={{ 
+                      marginTop: '8px', 
+                      fontSize: '12px', 
+                      color: '#1890ff',
+                      fontWeight: 'bold'
+                    }}>
+                      点击查看对比预览 • {selectedStyle?.name}风格
+                    </div>
+                  </div>
+                </Col>
+              </Row>
+              
+              {/* 风格信息指标 */}
+              <Row gutter={[16, 16]}>
+                <Col span={6}>
+                  <div style={{ 
+                    textAlign: 'center',
+                    padding: '16px',
+                    backgroundColor: '#e6f7ff',
+                    border: '1px solid #91d5ff',
+                    borderRadius: '6px'
+                  }}>
+                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1890ff' }}>
+                      {selectedStyle?.name}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                      艺术风格
+                    </div>
+                  </div>
+                </Col>
+                <Col span={6}>
+                  <div style={{ 
+                    textAlign: 'center',
+                    padding: '16px',
+                    backgroundColor: '#f6ffed',
+                    border: '1px solid #b7eb8f',
+                    borderRadius: '6px'
+                  }}>
+                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#52c41a' }}>
+                      {selectedStyle?.artist}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                      艺术家
+                    </div>
+                  </div>
+                </Col>
+                <Col span={6}>
+                  <div style={{ 
+                    textAlign: 'center',
+                    padding: '16px',
+                    backgroundColor: '#fff2e8',
+                    border: '1px solid #ffbb96',
+                    borderRadius: '6px'
+                  }}>
+                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#fa541c' }}>
+                      AI
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                      智能迁移
+                    </div>
+                  </div>
+                </Col>
+                <Col span={6}>
+                  <div style={{ 
+                    textAlign: 'center',
+                    padding: '16px',
+                    backgroundColor: '#f9f0ff',
+                    border: '1px solid #d3adf7',
+                    borderRadius: '6px'
+                  }}>
+                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#722ed1' }}>
+                      HD
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                      高清重建
+                    </div>
+                  </div>
+                </Col>
+              </Row>
+
+              {/* 大图对比按钮 */}
+              <div style={{ marginTop: '16px', textAlign: 'center' }}>
+                <Button 
+                  type="primary" 
+                  size="large"
+                  icon={<BgColorsOutlined />}
+                  onClick={() => {
+                    // 对比预览模态框
+                    Modal.info({
+                      title: (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <BgColorsOutlined />
+                          <span>艺术风格效果对比</span>
+                          {selectedStyle && (
+                            <span style={{ 
+                              fontSize: '12px', 
+                              color: '#1890ff',
+                              backgroundColor: '#e6f7ff',
+                              padding: '2px 8px',
+                              borderRadius: '10px'
+                            }}>
+                              {selectedStyle.name}风格
+                            </span>
+                          )}
+                        </div>
+                      ),
+                      width: '90%',
+                      style: { maxWidth: '1200px', top: 20 },
+                      content: (
+                        <div>
+                          <Row gutter={[24, 16]}>
+                            <Col xs={24} md={12}>
+                              <div style={{ textAlign: 'center' }}>
+                                <div style={{ 
+                                  fontSize: '16px', 
+                                  fontWeight: 'bold',
+                                  marginBottom: '12px', 
+                                  color: '#666'
+                                }}>
+                                  原图
+                                </div>
+                                <div style={{
+                                  border: '2px solid #e8e8e8',
+                                  borderRadius: '8px',
+                                  overflow: 'hidden',
+                                  backgroundColor: '#fafafa',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  minHeight: '400px'
+                                }}>
+                                  <img 
+                                    src={userAvatar?.url} 
+                                    alt="原图" 
+                                    style={{ 
+                                      maxWidth: '100%', 
+                                      maxHeight: '400px',
+                                      objectFit: 'contain'
+                                    }} 
+                                  />
+                                </div>
+                              </div>
+                            </Col>
+                            <Col xs={24} md={12}>
+                              <div style={{ textAlign: 'center' }}>
+                                <div style={{ 
+                                  fontSize: '16px', 
+                                  fontWeight: 'bold',
+                                  marginBottom: '12px', 
+                                  color: '#1890ff',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  gap: '8px'
+                                }}>
+                                  <BgColorsOutlined />
+                                  <span>{selectedStyle?.name}风格</span>
+                                </div>
+                                <div style={{
+                                  border: '3px solid #1890ff',
+                                  borderRadius: '8px',
+                                  overflow: 'hidden',
+                                  backgroundColor: '#fafafa',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  minHeight: '400px',
+                                  boxShadow: '0 4px 16px rgba(24, 144, 255, 0.15)'
+                                }}>
+                                  <img 
+                                    src={styleResult.resultUrl} 
+                                    alt="风格迁移结果" 
+                                    style={{ 
+                                      maxWidth: '100%', 
+                                      maxHeight: '400px',
+                                      objectFit: 'contain'
+                                    }} 
+                                  />
+                                </div>
+                              </div>
+                            </Col>
+                          </Row>
+                          
+                          {/* 风格信息等... */}
+                          <div style={{ 
+                            marginTop: '20px',
+                            padding: '16px',
+                            backgroundColor: '#f6ffed',
+                            border: '1px solid #b7eb8f',
+                            borderRadius: '8px'
+                          }}>
+                            <Row gutter={[16, 8]}>
+                              <Col span={6}>
+                                <div style={{ textAlign: 'center' }}>
+                                  <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#1890ff' }}>
+                                    {selectedStyle?.name}
+                                  </div>
+                                  <div style={{ fontSize: '12px', color: '#666' }}>艺术风格</div>
+                                </div>
+                              </Col>
+                              <Col span={6}>
+                                <div style={{ textAlign: 'center' }}>
+                                  <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#52c41a' }}>
+                                    {selectedStyle?.artist}
+                                  </div>
+                                  <div style={{ fontSize: '12px', color: '#666' }}>艺术家</div>
+                                </div>
+                              </Col>
+                              <Col span={6}>
+                                <div style={{ textAlign: 'center' }}>
+                                  <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#fa541c' }}>
+                                    AI
+                                  </div>
+                                  <div style={{ fontSize: '12px', color: '#666' }}>智能迁移</div>
+                                </div>
+                              </Col>
+                              <Col span={6}>
+                                <div style={{ textAlign: 'center' }}>
+                                  <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#722ed1' }}>
+                                    HD
+                                  </div>
+                                  <div style={{ fontSize: '12px', color: '#666' }}>高清重建</div>
+                                </div>
+                              </Col>
+                            </Row>
+                          </div>
+
+                          {/* 风格描述 */}
+                          {selectedStyle?.description && (
+                            <div style={{ 
+                              marginTop: '16px',
+                              padding: '12px',
+                              backgroundColor: '#f0f9ff',
+                              borderRadius: '6px',
+                              fontSize: '14px',
+                              color: '#1890ff',
+                              textAlign: 'center'
+                            }}>
+                              {selectedStyle.description}
+                            </div>
+                          )}
+                          
+                          {/* 操作按钮 */}
+                          <div style={{ 
+                            marginTop: '20px',
+                            textAlign: 'center'
+                          }}>
+                            <Space size="middle">
+                              <Button
+                                type="primary"
+                                icon={<DownloadOutlined />}
+                                onClick={handleDownload}
+                                size="large"
+                              >
+                                下载艺术风格头像
+                              </Button>
+                              <Button
+                                icon={<ShareAltOutlined />}
+                                onClick={handleShare}
+                                size="large"
+                              >
+                                分享作品
+                              </Button>
+                            </Space>
+                          </div>
+                        </div>
+                      ),
+                      okText: '关闭',
+                      okButtonProps: { size: 'large' }
+                    });
+                  }}
+                  style={{ 
+                    background: 'linear-gradient(45deg, #1890ff, #722ed1)',
+                    border: 'none'
+                  }}
+                >
+                  查看大图对比效果
+                </Button>
+              </div>
+            </Card>
+          ) : (
+            /* 无结果时显示引导界面 */
+            <Card>
+              <div style={{ 
+                textAlign: 'center', 
+                padding: '60px 20px',
+                color: '#999'
+              }}>
+                <BgColorsOutlined style={{ fontSize: '64px', marginBottom: '24px' }} />
+                <Title level={4} type="secondary">
+                  艺术风格迁移预览
+                </Title>
+                <Paragraph type="secondary">
+                  上传头像并选择艺术风格后，这里将显示风格迁移效果对比
+                </Paragraph>
+                
+                {/* 功能特点展示 */}
+                <Row gutter={[16, 16]} style={{ marginTop: '40px' }}>
+                  <Col span={8}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ 
+                        fontSize: '32px', 
+                        marginBottom: '8px',
+                        color: '#1890ff'
+                      }}>
+                        🎨
+                      </div>
+                      <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>
+                        艺术风格
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#999' }}>
+                        6种经典艺术大师风格
+                      </div>
+                    </div>
+                  </Col>
+                  <Col span={8}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ 
+                        fontSize: '32px', 
+                        marginBottom: '8px',
+                        color: '#52c41a'
+                      }}>
+                        ⚡
+                      </div>
+                      <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>
+                        智能迁移
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#999' }}>
+                        AI深度学习风格转换
+                      </div>
+                    </div>
+                  </Col>
+                  <Col span={8}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ 
+                        fontSize: '32px', 
+                        marginBottom: '8px',
+                        color: '#fa541c'
+                      }}>
+                        🎯
+                      </div>
+                      <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>
+                        高保真
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#999' }}>
+                        保持面部特征完整性
+                      </div>
+                    </div>
+                  </Col>
+                </Row>
+              </div>
+            </Card>
+          )}
         </Col>
       </Row>
 
-      {/* 分享二维码弹窗 */}
+      {/* 分享弹窗 */}
       <Modal
-        title="微信分享"
+        title="分享您的艺术作品"
         open={shareModalVisible}
         onCancel={() => setShareModalVisible(false)}
         footer={[
@@ -577,8 +1240,8 @@ const StyleTransfer: React.FC = () => {
             type="primary" 
             onClick={() => {
               if (shareData) {
-                navigator.clipboard.writeText(shareData.shareUrl)
-                message.success('链接已复制到剪贴板')
+                navigator.clipboard.writeText(shareData.shareUrl);
+                message.success('链接已复制到剪贴板');
               }
             }}
           >
@@ -593,9 +1256,9 @@ const StyleTransfer: React.FC = () => {
               alt="分享二维码" 
               style={{ maxWidth: '100%', height: 'auto', marginBottom: 16 }} 
             />
-            <p>扫描二维码查看您的{selectedStyle?.name}风格头像</p>
+            <p>扫描二维码查看您的艺术风格头像</p>
             <p style={{ fontSize: '12px', color: 'rgba(0, 0, 0, 0.45)' }}>
-              链接有效期至: {new Date(shareData.expiresAt).toLocaleString()}
+              链接有效期至: {shareData.expiresAt}
             </p>
           </div>
         )}

@@ -11,11 +11,13 @@
     "update-frames": "node scripts/updatePresetFrameUrls.js",
     "setup-full": "npm run test-connection && npm run create-db && npm run init-db && npm run test-db",
     "dev": "nodemon app.js",
-    "start": "node app.js"
+    "start": "node app.js",
+    "test-watermark": "node TEST/testWatermark.js"
   },
   "dependencies": {
     "aws-sdk": "^2.1043.0",
     "bcryptjs": "^2.4.3",
+    "canvas": "^2.11.2",
     "cloudinary": "^2.6.1",
     "cors": "^2.8.5",
     "dotenv": "^16.0.3",

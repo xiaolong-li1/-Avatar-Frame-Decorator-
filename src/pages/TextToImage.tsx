@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Card, Row, Col, Button, Typography, Input, message, Space, Progress } from 'antd'
 import { BulbOutlined, DownloadOutlined, HistoryOutlined } from '@ant-design/icons'
 import { api, pollTaskStatus, handleApiError } from '../services/api'
+import { useAITask } from '../contexts/AITaskContext'
 
 const { Title, Paragraph } = Typography
 const { TextArea } = Input
@@ -14,6 +15,7 @@ const TextToImage: React.FC = () => {
   const [taskId, setTaskId] = useState<string>('')
   const [generationHistory, setGenerationHistory] = useState<any[]>([])
   const [showHistory, setShowHistory] = useState(false)
+  const { getTasksByType, isTaskRunning, startTask } = useAITask()
 
   const promptExamples = [
     '星空下的猫咪，梦幻风格',
@@ -23,6 +25,47 @@ const TextToImage: React.FC = () => {
     '赛博朋克风格的机器人',
     '动漫风格的少女'
   ]
+
+  // 组件挂载时恢复状态
+  useEffect(() => {
+    // 恢复上次处理的任务状态
+    const textToImageTasks = getTasksByType('text-to-image')
+    if (textToImageTasks.length > 0) {
+      // 找出最近的一个任务
+      const latestTask = textToImageTasks.sort((a, b) => b.startTime - a.startTime)[0]
+      
+      // 恢复输入的提示词
+      if (latestTask.params && latestTask.params.prompt) {
+        setPrompt(latestTask.params.prompt)
+      }
+      
+      // 恢复任务ID
+      if (latestTask.taskId) {
+        setTaskId(latestTask.taskId)
+      }
+      
+      // 恢复生成的图像
+      if (latestTask.result && latestTask.result.resultUrl) {
+        setGeneratedImage(latestTask.result.resultUrl)
+      }
+      
+      // 恢复任务进度
+      if (latestTask.progress) {
+        setProgress(latestTask.progress)
+      }
+      
+      // 恢复生成状态
+      if (latestTask.status === 'processing' || latestTask.status === 'pending') {
+        setIsGenerating(true)
+      } else {
+        setIsGenerating(false)
+      }
+    }
+    
+    // 检查是否有任务正在运行
+    const running = isTaskRunning('text-to-image')
+    setIsGenerating(running)
+  }, [])
 
   // 加载历史记录
   useEffect(() => {
@@ -52,18 +95,31 @@ const TextToImage: React.FC = () => {
     setProgress(0)
     
     try {
-      // 调用后端 API 生成图像
+      // 使用AITaskContext启动任务
+      const newTaskId = await startTask('text-to-image', { 
+        prompt, 
+        width: 1024, 
+        height: 1024, 
+        model: 'dall-e-3',
+        quality: 'standard'
+      })
+      
+      setTaskId(newTaskId)
+      
+      // 直接向API发起请求
       const response = await api.textToImage(prompt, 1024, 1024, 'dall-e-3', 'standard')
       
       if (response.success) {
-        setTaskId(response.data.taskId)
+        if (response.data.taskId) {
+          setTaskId(response.data.taskId)
+        }
         
         // 如果返回了直接可用的 resultUrl，使用它
         if (response.data.resultUrl) {
           setGeneratedImage(response.data.resultUrl)
           setIsGenerating(false)
           message.success('头像生成成功！')
-        } else {
+        } else if (response.data.taskId) {
           // 否则，开始轮询任务状态
           pollTaskStatus(response.data.taskId, (status) => {
             // 更新进度
@@ -143,7 +199,7 @@ const TextToImage: React.FC = () => {
   return (
     <div className="fade-in-up">
       <Title level={2} style={{ marginBottom: '8px' }}>
-        文生图头像生成
+        文本生成头像
       </Title>
       <Paragraph type="secondary" style={{ marginBottom: '24px' }}>
         通过文字描述自动生成个性化头像，释放您的创意想象

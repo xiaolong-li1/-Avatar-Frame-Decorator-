@@ -673,3 +673,148 @@ exports.deleteAllAIRecords = async (req, res) => {
     });
   }
 };
+
+// 添加水印
+exports.addWatermark = async (req, res) => {
+  try {
+    const { avatarFileId, watermarkType, content, options } = req.body;
+    const { position = 'bottom-right', opacity = 0.3, fontSize = 16, color = '#ffffff' } = options || {};
+    const userId = req.body.userId;
+
+    if (!avatarFileId) {
+      return res.status(400).json({
+        success: false,
+        message: '缺少头像文件ID'
+      });
+    }
+
+    if (!content) {
+      return res.status(400).json({
+        success: false,
+        message: '缺少水印内容'
+      });
+    }
+
+    // 1. 从avatars表获取头像信息
+    const avatarQuery = 'SELECT * FROM avatars WHERE id = $1 AND is_active = true';
+    const avatarResult = await pool.query(avatarQuery, [avatarFileId]);
+    
+    if (avatarResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: '找不到指定的头像或头像已被删除'
+      });
+    }
+
+    const avatarInfo = avatarResult.rows[0];
+    const originalUrl = avatarInfo.file_url;
+
+    if (!originalUrl) {
+      return res.status(404).json({
+        success: false,
+        message: '头像文件URL不存在'
+      });
+    }
+
+    console.log('🚀 开始添加水印:', {
+      avatarFileId,
+      watermarkType,
+      content,
+      position,
+      opacity,
+      fontSize,
+      color,
+      userId: userId || 'anonymous'
+    });
+
+    // 2. 调用服务添加水印
+    const watermarkOptions = {
+      position,
+      opacity,
+      fontSize,
+      color
+    };
+
+    let processedUrl = await aiService.addWatermark(originalUrl, content, watermarkType, watermarkOptions);
+    console.log('✅ 水印添加完成:', processedUrl);
+
+    // 3. 保存AI生成记录到数据库
+    let recordId = null;
+    try {
+      recordId = await aiService.saveAIGeneratedRecord(
+        userId || null,
+        'watermark',
+        originalUrl,
+        `添加${watermarkType === 'invisible' ? '隐形' : ''}水印: "${content}"`,
+        processedUrl,
+        'watermark',
+        { watermarkType, position, opacity, fontSize, color }
+      );
+      console.log('📝 记录已保存到数据库，ID:', recordId);
+    } catch (dbError) {
+      console.error('⚠️ 保存记录失败，但处理成功:', dbError.message);
+      // 不影响主流程
+    }
+
+    // 4. 返回成功结果
+    return res.json({
+      success: true,
+      message: '水印添加成功',
+      data: {
+        taskId: recordId,
+        resultUrl: processedUrl,
+        status: 'completed'
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ 添加水印失败:', error);
+    return res.status(500).json({
+      success: false,
+      message: '添加水印失败: ' + error.message
+    });
+  }
+};
+
+// 检测水印
+exports.detectWatermark = async (req, res) => {
+  try {
+    const { imageFileId } = req.body;
+
+    if (!imageFileId) {
+      return res.status(400).json({
+        success: false,
+        message: '缺少图片文件ID'
+      });
+    }
+
+    // 获取图片URL
+    const imageQuery = 'SELECT file_url FROM avatars WHERE id = $1';
+    const imageResult = await pool.query(imageQuery, [imageFileId]);
+    
+    if (imageResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: '找不到指定的图片'
+      });
+    }
+
+    const imageUrl = imageResult.rows[0].file_url;
+
+    // 调用服务检测水印
+    const detectionResult = await aiService.detectWatermark(imageUrl);
+
+    return res.json({
+      success: true,
+      message: detectionResult.hasWatermark ? '检测到水印' : '未检测到水印',
+      data: detectionResult
+    });
+
+  } catch (error) {
+    console.error('❌ 检测水印失败:', error);
+    return res.status(500).json({
+      success: false,
+      message: '检测水印失败: ' + error.message
+    });
+  }
+};

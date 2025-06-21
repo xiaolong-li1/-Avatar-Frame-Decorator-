@@ -5,6 +5,8 @@ const pool = require('../config/database');
 const fileStorageService = require('./fileStorageService');
 const os = require('os');
 const fetch = require('node-fetch');
+const sharp = require('sharp');
+const { v4: uuidv4 } = require('uuid');
 require('dotenv').config();
 
 // API 基础 URL 和 API Key
@@ -113,13 +115,13 @@ const styleTransfer = async (imageUrl, stylePrompt) => {
       + `-F "n=1" `
       + `-F "size=1024x1024" `
       + `--connect-timeout 30 `
-      + `--max-time 120`;
+      + `--max-time 180`;
       
     console.log(`执行命令: ${curlCommand.replace(API_KEY, 'API_KEY_HIDDEN')}`);
     
     // 执行 curl 命令
     const output = execSync(curlCommand, { 
-      timeout: 120000,
+      timeout: 180000,
       encoding: 'utf8',
       maxBuffer: 1024 * 1024 * 10
     }).toString();
@@ -173,30 +175,33 @@ const downloadImage = async (url) => {
   console.log(`📥 开始下载图像: ${url}`);
   
   let lastError;
-  const maxRetries = 3;
+  const maxRetries = 10;
   
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       console.log(`📥 第 ${attempt}/${maxRetries} 次下载尝试...`);
       
-      // 增加超时时间并设置更多选项
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => {
-        controller.abort();
-        console.log('❌ 下载超时，正在中止请求...');
-      }, 60000); // 30秒超时
-      
+      // 使用更完整的浏览器请求头
       const response = await fetch(url, {
-        signal: controller.signal,
+        method: 'GET',
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'image/*,*/*',
-          'Connection': 'keep-alive'
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache',
+          'Sec-Fetch-Dest': 'image',
+          'Sec-Fetch-Mode': 'no-cors',
+          'Sec-Fetch-Site': 'cross-site',
+          'Connection': 'close' // 强制关闭连接，避免复用
         },
-        timeout: 60000
+        // 移除 timeout 选项，只使用 signal
+        signal: AbortSignal.timeout(60000), // 使用新的 timeout API
+        // 添加其他选项
+        redirect: 'follow',
+        referrerPolicy: 'no-referrer-when-downgrade'
       });
-      
-      clearTimeout(timeoutId);
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -211,8 +216,13 @@ const downloadImage = async (url) => {
       lastError = error;
       console.log(`❌ 第 ${attempt} 次下载失败:`, error.message);
       
-      if (attempt < maxRetries) {
-        const delay = attempt * 10000; // 2秒, 4秒, 6秒
+      // 如果是连接重置错误，等待更长时间
+      if (error.message.includes('ECONNRESET') || error.message.includes('network')) {
+        const delay = attempt * 1500; // 15秒, 30秒, 45秒
+        console.log(`⏳ 网络错误，等待 ${delay/1000} 秒后重试...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      } else if (attempt < maxRetries) {
+        const delay = attempt * 5000; // 其他错误等待较短时间
         console.log(`⏳ 等待 ${delay/1000} 秒后重试...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
@@ -253,13 +263,13 @@ const backgroundBlur = async (imageUrl, blurLevel = 5) => {
       + `-F "n=1" `
       + `-F "size=1024x1024" `
       + `--connect-timeout 30 `
-      + `--max-time 120`;
+      + `--max-time 180`;
       
     console.log(`🚀 执行 AI 处理命令: ${curlCommand.replace(API_KEY, 'API_KEY_HIDDEN')}`);
     
     // 执行 curl 命令
     const output = execSync(curlCommand, { 
-      timeout: 120000, // 120秒超时
+      timeout: 180000, // 180秒超时
       encoding: 'utf8',
       maxBuffer: 1024 * 1024 * 10 // 10MB buffer
     }).toString();
@@ -438,13 +448,13 @@ const superResolution = async (imageUrl, scaleFactor = 2, quality = 'high') => {
       + `-F "n=1" `
       + `-F "size=1024x1024" `
       + `--connect-timeout 30 `
-      + `--max-time 120`;
+      + `--max-time 180`;
       
     console.log(`🚀 执行 AI 处理命令: ${curlCommand.replace(API_KEY, 'API_KEY_HIDDEN')}`);
     
     // 执行 curl 命令
     const output = execSync(curlCommand, { 
-      timeout: 120000, // 120秒超时
+      timeout: 180000, // 120秒超时
       encoding: 'utf8',
       maxBuffer: 1024 * 1024 * 10 // 10MB buffer
     }).toString();
@@ -831,17 +841,208 @@ const deleteAllAIRecordsByUser = async (userId, taskType = null) => {
   }
 };
 
+// 添加水印
+const addWatermark = async (imageUrl, content, watermarkType = 'text', options = {}) => {
+  try {
+    const {
+      position = 'bottom-right',
+      opacity = 0.8,
+      fontSize = 16,
+      color = '#ffffff'
+    } = options;
+
+    console.log(`🖌️ 开始添加水印: 图像=${imageUrl}, 内容=${content}, 类型=${watermarkType}`);
+    console.log(`水印选项: 位置=${position}, 透明度=${opacity}, 字体大小=${fontSize}, 颜色=${color}`);
+
+    // 1. 下载原始图像
+    const imageBuffer = await downloadImage(imageUrl);
+    if (!imageBuffer) {
+      throw new Error('下载图像失败');
+    }
+    console.log(`✅ 图像下载成功，大小: ${imageBuffer.length} bytes`);
+
+    // 2. 使用Sharp添加水印
+    // 获取图像信息
+    const metadata = await sharp(imageBuffer).metadata();
+    const { width, height } = metadata;
+    console.log(`图像尺寸: ${width}x${height}`);
+
+    // 创建SVG水印文字
+    let svgText;
+    
+    if (position === 'tile') {
+      // 平铺水印效果
+      // 创建一个基本的SVG模板，包含水印文字
+      let tileWidth = width / 3; // 平铺的宽度间隔
+      let tileHeight = height / 3; // 平铺的高度间隔
+      
+      let svgContent = '';
+      // 创建一个3x3的平铺网格
+      for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 3; j++) {
+          const x = tileWidth * i + tileWidth / 2;
+          const y = tileHeight * j + tileHeight / 2;
+          svgContent += `<text x="${x}" y="${y}" 
+                          font-family="Arial" 
+                          font-size="${fontSize}" 
+                          fill="${formatRGBA(color, opacity)}" 
+                          text-anchor="middle" 
+                          transform="rotate(-15, ${x}, ${y})">${content}</text>`;
+        }
+      }
+      
+      svgText = `<svg width="${width}" height="${height}">${svgContent}</svg>`;
+      
+    } else {
+      // 单一水印位置计算
+      let x, y, textAnchor, alignment;
+      
+      switch (position) {
+        case 'top-left':
+          x = 20;
+          y = 20 + fontSize;
+          textAnchor = 'start';
+          alignment = 'start';
+          break;
+        case 'top-right':
+          x = width - 20;
+          y = 20 + fontSize;
+          textAnchor = 'end';
+          alignment = 'end';
+          break;
+        case 'bottom-left':
+          x = 20;
+          y = height - 20;
+          textAnchor = 'start';
+          alignment = 'start';
+          break;
+        case 'bottom-right':
+          x = width - 20;
+          y = height - 20;
+          textAnchor = 'end';
+          alignment = 'end';
+          break;
+        case 'center':
+          x = width / 2;
+          y = height / 2;
+          textAnchor = 'middle';
+          alignment = 'middle';
+          break;
+        default:
+          // 默认右下角
+          x = width - 20;
+          y = height - 20;
+          textAnchor = 'end';
+          alignment = 'end';
+      }
+      
+      svgText = `<svg width="${width}" height="${height}">
+                <text x="${x}" y="${y}" 
+                      font-family="Arial" 
+                      font-size="${fontSize}" 
+                      fill="${formatRGBA(color, opacity)}"
+                      text-anchor="${textAnchor}">${content}</text>
+                </svg>`;
+    }
+    
+    // 将SVG转换为Buffer
+    const svgBuffer = Buffer.from(svgText);
+    console.log('✅ 已创建SVG水印');
+    
+    // 将水印叠加在原图上
+    const watermarkedBuffer = await sharp(imageBuffer)
+      .composite([
+        {
+          input: svgBuffer,
+          top: 0,
+          left: 0,
+        }
+      ])
+      .toFormat('png')
+      .toBuffer();
+    
+    console.log(`✅ 已将水印添加到图片，处理后大小: ${watermarkedBuffer.length} bytes`);
+    
+    // 3. 生成文件名并保存
+    const filename = path.basename(imageUrl);
+    const uniqueFilename = `watermarked_${Date.now()}_${Math.floor(Math.random() * 1000)}.png`;
+    console.log(`保存水印图像，文件名: ${uniqueFilename}`);
+    
+    // 使用uploadFile函数替代saveImage函数，因为问题出在这里
+    const resultUrl = await fileStorageService.uploadFile(
+      watermarkedBuffer,
+      `watermarked/${uniqueFilename}`,
+      'image/png'
+    );
+    
+    console.log(`✅ 水印图像保存成功: ${resultUrl}`);
+    return resultUrl;
+  } catch (error) {
+    console.error('添加水印失败:', error);
+    throw new Error(`添加水印失败: ${error.message}`);
+  }
+};
+
+// 将颜色转换为rgba格式，确保颜色足够深
+function formatRGBA(color, opacity) {
+  // 确保不透明度至少为0.7，使颜色更加明显
+  const finalOpacity = Math.max(opacity, 0.7);
+  
+  // 如果传入的颜色是十六进制格式
+  if (color.startsWith('#')) {
+    const r = parseInt(color.slice(1, 3), 16);
+    const g = parseInt(color.slice(3, 5), 16);
+    const b = parseInt(color.slice(5, 7), 16);
+    return `rgba(${r}, ${g}, ${b}, ${finalOpacity})`;
+  }
+  
+  // 如果传入的颜色已经是 rgb 或 rgba 格式
+  if (color.startsWith('rgb')) {
+    if (color.startsWith('rgba')) {
+      // 替换原有的透明度值
+      return color.replace(/rgba\((\d+),\s*(\d+),\s*(\d+),\s*[\d\.]+\)/, `rgba($1, $2, $3, ${finalOpacity})`);
+    } else {
+      // 将 rgb 转换为 rgba
+      return color.replace('rgb', 'rgba').replace(')', `, ${finalOpacity})`);
+    }
+  }
+  
+  // 默认返回带透明度的白色
+  return `rgba(255, 255, 255, ${finalOpacity})`;
+}
+
+// 检测水印（简单实现，实际应该根据水印类型采用不同的检测方法）
+const detectWatermark = async (imageUrl) => {
+  try {
+    // 在实际应用中，这里应该是一个复杂的水印检测算法
+    // 当前简单实现，返回一个模拟结果
+    return {
+      hasWatermark: Math.random() > 0.5, // 随机返回是否有水印
+      watermarkInfo: {
+        content: "© WeFrame",
+        confidence: 0.85 + Math.random() * 0.15, // 随机置信度
+      }
+    };
+  } catch (error) {
+    console.error('检测水印失败:', error);
+    throw new Error(`检测水印失败: ${error.message}`);
+  }
+};
+
+// 导出函数
 module.exports = {
   textToImage,
   styleTransfer,
+  getAvailableStyles,
+  getStylePrompt,
   backgroundBlur,
   backgroundReplace,
   superResolution,
-  getAvailableStyles,
-  getStylePrompt,
   saveAIGeneratedRecord,
   getAIGeneratedHistory,
   deleteAIGeneratedRecord,
   deleteMultipleAIRecords,
-  deleteAllAIRecordsByUser
+  deleteAllAIRecordsByUser,
+  addWatermark,
+  detectWatermark
 };

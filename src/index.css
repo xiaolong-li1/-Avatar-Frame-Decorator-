@@ -97,4 +97,146 @@ body {
   border-radius: 6px;
   padding: 8px 12px;
   font-size: 12px;
-} 
+}
+
+/* 自定义侧边栏菜单样式 */
+.custom-menu.ant-menu {
+  font-size: 14px !important;
+}
+
+.custom-menu.ant-menu .ant-menu-item {
+  border-radius: 6px;
+  margin: 4px 8px !important;
+  height: 44px;
+  padding: 0 16px !important;
+  display: flex;
+  align-items: center;
+  line-height: 44px !important;
+}
+
+.custom-menu.ant-menu-inline-collapsed .ant-menu-item {
+  padding: 0 calc(50% - 12px) !important;
+  margin: 4px 4px !important;
+}
+
+.custom-menu.ant-menu .ant-menu-item.ant-menu-item-selected {
+  background: rgba(102, 126, 234, 0.1);
+}
+
+.custom-menu.ant-menu .ant-menu-item.ant-menu-item-selected .anticon,
+.custom-menu.ant-menu .ant-menu-item.ant-menu-item-selected .ant-menu-item-title {
+  color: #667eea !important;
+  font-weight: 500;
+}
+
+.custom-menu.ant-menu .ant-menu-item .anticon {
+  font-size: 16px;
+  margin-right: 10px;
+  transition: all 0.3s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.custom-menu.ant-menu .ant-menu-title-content {
+  transition: opacity 0.3s cubic-bezier(0.645, 0.045, 0.355, 1), margin 0.3s, color 0.3s;
+}
+
+/* 改善过渡动画 */
+.ant-layout-sider {
+  transition: all 0.3s cubic-bezier(0.2, 0, 0, 1) !important;
+}
+
+.ant-layout {
+  transition: all 0.3s cubic-bezier(0.2, 0, 0, 1) !important;
+}
+
+/* 侧边栏展开/收起按钮样式 */
+.sider-toggle-btn {
+  transition: all 0.3s cubic-bezier(0.2, 0, 0, 1);
+  border-radius: 6px;
+}
+
+.sider-toggle-btn:hover {
+  background: rgba(102, 126, 234, 0.1);
+  color: #667eea;
+}
+
+.sider-toggle-btn-collapsed {
+  margin: 4px auto 0;
+  background: rgba(0, 0, 0, 0.02);
+  width: 72px !important;
+  height: 44px !important;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sider-toggle-btn-collapsed:hover {
+  background: rgba(102, 126, 234, 0.15);
+}
+
+/* 下载App按钮样式 - 与菜单项一致 */
+.menu-like-item {
+  transition: all 0.3s cubic-bezier(0.2, 0, 0, 1) !important;
+  user-select: none;
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 14px;
+  line-height: 44px;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.menu-like-item:hover {
+  color: #667eea;
+  background-color: rgba(102, 126, 234, 0.1);
+}
+
+.menu-like-item.collapsed {
+  padding: 0 !important;
+  justify-content: center;
+}
+
+/* 图标样式 */
+.menu-like-item .ant-menu-item-icon,
+.menu-like-item .menu-item-icon {
+  min-width: 14px;
+  font-size: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: font-size 0.15s cubic-bezier(0.215, 0.61, 0.355, 1), margin 0.3s cubic-bezier(0.645, 0.045, 0.355, 1), color 0.3s;
+}
+
+/* 文本样式 */
+.menu-like-item .ant-menu-title-content,
+.menu-like-item .menu-item-text {
+  opacity: 1;
+  transition: opacity 0.3s cubic-bezier(0.645, 0.045, 0.355, 1), width 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+  white-space: nowrap;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  height: 44px;
+  line-height: 44px;
+  margin-left: 0;
+}
+
+/* 特别针对文本对齐的修复 */
+.ant-menu-title-content {
+  height: 44px;
+  line-height: 44px;
+  display: flex;
+  align-items: center;
+}
+
+.ant-menu-item-icon + span {
+  height: 44px;
+  line-height: 44px;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* 自定义菜单样式 */

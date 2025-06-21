@@ -1,5 +1,15 @@
 import { message } from 'antd'
-import { API_CONFIG, API_ENDPOINTS, ApiResponse, UploadResponse, TaskStatus, Frame, ArtStyle, Effect } from '../config/api'
+import { API_CONFIG, API_ENDPOINTS, ApiResponse, UploadResponse, TaskStatus, Frame, ArtStyle } from '../config/api'
+import Cookies from 'js-cookie'
+
+// Cookie选项
+const COOKIE_OPTIONS = {
+  expires: 7, // 7天过期
+  path: '/',
+  sameSite: 'strict' as 'strict',
+  secure: window.location.protocol === 'https:'
+};
+
 // 基于 Fetch 的封装类
 class ApiService {
   private baseURL: string;
@@ -197,15 +207,47 @@ const apiService = new ApiService()
 
 // 具体的API调用方法
 export const api = {
+    // 获取用户统计信息
+    getUserStats: async () => {
+      interface UserStatsResponse {
+        userCount: number;
+      }
+      
+      try {
+        const response = await apiService.get<UserStatsResponse>(API_ENDPOINTS.AUTH.STATS);
+        return response;
+      } catch (error) {
+        console.error("获取用户统计信息失败:", error);
+        throw error;
+      }
+    },
+    
     // 用户注册
-  register: (username: string, password: string) => {
+  register: async (username: string, password: string) => {
     const url = API_ENDPOINTS.AUTH.REGISTER;
     const body = { username, password };
-    // message.info(`POST ${url} \nRequest Body: ${JSON.stringify(body)}`);
-    return apiService.post<{ token: string; user: { id: string; username: string } }>(url, body);
+    try {
+      const response = await apiService.post<{ token: string; user: { id: string; username: string } }>(url, body);
+      
+      if (response.success && response.data) {
+        // 存储到Cookie
+        Cookies.set('token', response.data.token, COOKIE_OPTIONS);
+        Cookies.set('userId', response.data.user.id, COOKIE_OPTIONS);
+        Cookies.set('username', response.data.user.username, COOKIE_OPTIONS);
+        
+        // 同时保留localStorage存储以兼容现有代码
+        localStorage.setItem('token', response.data.token);
+        localStorage.setItem('userId', response.data.user.id);
+        localStorage.setItem('username', response.data.user.username);
+      }
+      
+      return response;
+    } catch (error) {
+      throw error;
+    }
   },
 
-  login: async (username: string, password: string) => {
+  login: async (username: string, password: string, remember: boolean = true) => {
     try {
       const response = await apiService.post<{ token: string; user: { id: string; username: string } }>(
         API_ENDPOINTS.AUTH.LOGIN, 
@@ -213,13 +255,21 @@ export const api = {
       );
       
       if (response.success) {
-        // message.success('登录成功');
+        // 根据"记住我"选项设置Cookie过期时间
+        const cookieOptions = remember ? COOKIE_OPTIONS : { ...COOKIE_OPTIONS, expires: 1 };
+        
+        // 存储到Cookie
+        Cookies.set('token', response.data.token, cookieOptions);
+        Cookies.set('userId', response.data.user.id, cookieOptions);
+        Cookies.set('username', response.data.user.username, cookieOptions);
+        
+        // 同时保留localStorage存储以兼容现有代码
+        localStorage.setItem('token', response.data.token);
+        localStorage.setItem('userId', response.data.user.id);
+        localStorage.setItem('username', response.data.user.username);
+        
         message.info(`欢迎回来，${response.data.user.username}！`);
         console.log('登录成功，存储用户信息:', response.data.user);
-        // 存储token和userId
-        localStorage.setItem('token', response.data.token);
-        localStorage.setItem('userId', response.data.user.id); // 添加这行
-        localStorage.setItem('username', response.data.user.username);
       }
       
       return response;
@@ -239,6 +289,21 @@ export const api = {
       name, 
       description: description || '' 
     }),
+
+  // 添加水印
+  addWatermark: (params: {
+    avatarFileId: string;
+    watermarkType: string;
+    content: string;
+    options: {
+      position: string;
+      opacity: number;
+      fontSize: number;
+      color: string;
+    }
+  }) => {
+    return apiService.post(API_ENDPOINTS.COPYRIGHT.WATERMARK, params);
+  },
 
   // 预设头像框
   getPresetFrames: (category?: string, page = 1, limit = 20) => {
@@ -404,13 +469,6 @@ export const api = {
     )
   },
 
-  // 版权保护
-  addWatermark: (avatarFileId: string, watermarkType: string, content: string, options = {}) => 
-    apiService.post<{ taskId: string, resultUrl: string, status: string }>(
-      API_ENDPOINTS.COPYRIGHT.WATERMARK,
-      { avatarFileId, watermarkType, content, options }
-    ),
-
   detectWatermark: (imageFileId: string) => 
     apiService.post<{ hasWatermark: boolean, watermarkInfo?: any }>(
       API_ENDPOINTS.COPYRIGHT.DETECT,
@@ -455,7 +513,8 @@ export const api = {
       API_ENDPOINTS.SYSTEM.STATUS
     ),
 
-  getUserStats: () => 
+  // 获取用户配额/统计信息（处理次数、剩余额度等）
+  getUserQuotaStats: () => 
     apiService.get<{ totalProcessed: number, todayProcessed: number, remainingQuota: number, favoriteEffects: string[] }>(
       API_ENDPOINTS.SYSTEM.USER_STATS
     ),

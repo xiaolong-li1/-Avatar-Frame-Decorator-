@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Card, Row, Col, Button, Typography, Space, message, Upload, Divider, Slider, Spin, Modal, Checkbox } from 'antd'
 import { UploadOutlined, DeleteOutlined, EditOutlined, LoadingOutlined } from '@ant-design/icons'
 import AvatarUpload from '../components/AvatarUpload'
 import { api, handleApiError } from '../services/api'
+import usePersistedState from '../hooks/usePersistedState'
 
 const { Title, Paragraph } = Typography
 const { Dragger } = Upload
@@ -17,7 +18,7 @@ interface CustomFrame {
 }
 
 const CustomFrames: React.FC = () => {
-  const [userAvatar, setUserAvatar] = useState<string>('')
+  const [userAvatar, setUserAvatar] = usePersistedState<string>('custom-frames-avatar', '')
   const [avatarFileId, setAvatarFileId] = useState<string>('')
   const [customFrames, setCustomFrames] = useState<CustomFrame[]>([])
   const [selectedFrame, setSelectedFrame] = useState<CustomFrame | null>(null)
@@ -72,6 +73,7 @@ const CustomFrames: React.FC = () => {
     setUserAvatar(fileUrl)
     setAvatarFileId(fileId)
     setPreviewImage(fileUrl) // 初始预览图是原始头像
+    message.info('头像已上传，选择头像框并调整效果')
   }
   
   const handleFrameUpload = async (file: File) => {
@@ -504,7 +506,7 @@ const CustomFrames: React.FC = () => {
                 
                 {selectedFrame && (
                   <div style={{ marginBottom: '16px', textAlign: 'left' }}>
-                    <Paragraph strong>透明度调整</Paragraph>
+                    <Paragraph strong>不透明度调整</Paragraph>
                     <Slider
                       min={10}
                       max={100}

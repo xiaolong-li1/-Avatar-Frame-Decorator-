@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Typography, Tabs, List, Button, Image, message, Tag, Space, Pagination, Empty, Modal } from 'antd';
+import { Card, Typography, Tabs, List, Button, Image, message, Tag, Space, Pagination, Empty, Modal, Checkbox } from 'antd';
 import { DownloadOutlined, ShareAltOutlined, EyeOutlined, DeleteOutlined } from '@ant-design/icons';
 import { api, handleApiError } from '../services/api';
 
@@ -39,15 +39,22 @@ const AIHistory: React.FC = () => {
   const [historyData, setHistoryData] = useState<{ [key: string]: HistoryData }>({});
   const [loading, setLoading] = useState<{ [key: string]: boolean }>({});
   const [currentPage, setCurrentPage] = useState<{ [key: string]: number }>({});
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  // 分享弹窗相关状态
+  const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [shareData, setShareData] = useState<{
+    shareUrl: string;
+    qrCodeUrl: string;
+    expiresAt: string;
+  } | null>(null);
 
   // 历史记录类型配置
   const historyTypes = [
     { key: 'all', label: '全部记录' },
-    { key: 'super-resolution', label: '超分辨率' },
-    { key: 'style-transfer', label: '风格迁移' },
-    { key: 'background-blur', label: '背景模糊' },
-    { key: 'background-replace', label: '背景替换' },
-    { key: 'text-to-image', label: '文本生成图像' }
+    { key: 'super-resolution', label: '头像超分处理' },
+    { key: 'style-transfer', label: '艺术风格迁移' },
+    { key: 'background-blur', label: '人像背景虚化' },
+    { key: 'text-to-image', label: '文本生成头像' }
   ];
 
   // 调用对应的API
@@ -61,8 +68,6 @@ const AIHistory: React.FC = () => {
         return await api.getStyleTransferHistory(page, limit);
       case 'background-blur':
         return await api.getBackgroundBlurHistory(page, limit);
-      case 'background-replace':
-        return await api.getBackgroundReplaceHistory(page, limit);
       case 'text-to-image':
         return await api.getTextToImageHistory(page, limit);
       default:
@@ -179,6 +184,8 @@ const AIHistory: React.FC = () => {
       });
       
       if (response.success && response.data) {
+        setShareData(response.data);
+        setShareModalVisible(true);
         message.success('分享链接创建成功');
       }
     } catch (error) {
@@ -225,6 +232,7 @@ const AIHistory: React.FC = () => {
       okType: 'danger',
       cancelText: '取消',
       onOk: async () => {
+        setSelectedIds([]); // 清空选中
         try {
           const response = await api.deleteMultipleAIRecords(recordIds);
           if (response.success) {
@@ -273,7 +281,6 @@ const AIHistory: React.FC = () => {
       'super_resolution': '超分辨率',
       'style-transfer': '风格迁移', 
       'background_blur': '背景模糊',
-      'background-replace': '背景替换',
       'text-to-image': '文本生成图像'
     };
     return typeMap[taskType] || taskType;
@@ -330,6 +337,15 @@ const AIHistory: React.FC = () => {
         </Button>
       ]}
     >
+      <Checkbox
+        checked={selectedIds.includes(record.id)}
+        onChange={e => {
+          setSelectedIds(prev =>
+            e.target.checked ? [...prev, record.id] : prev.filter(id => id !== record.id)
+          );
+        }}
+        style={{ marginRight: 12 }}
+      />
       <List.Item.Meta
         avatar={
           <Image
@@ -394,7 +410,18 @@ const AIHistory: React.FC = () => {
     return (
       <>
         {/* 批量操作按钮 */}
-        <div style={{ marginBottom: '16px', textAlign: 'right' }}>
+        <div style={{ marginBottom: '16px', textAlign: 'right', display: 'flex', justifyContent: 'space-between' }}>
+          <Checkbox
+            indeterminate={selectedIds.length>0 && selectedIds.length<data.records.length}
+            checked={selectedIds.length === data.records.length && data.records.length>0}
+            onChange={e=>{
+              if(e.target.checked){
+                setSelectedIds(data.records.map(r=>r.id));
+              }else{
+                setSelectedIds([]);
+              }
+            }}
+          >全选</Checkbox>
           <Space>
             <Button 
               danger 
@@ -402,6 +429,14 @@ const AIHistory: React.FC = () => {
               disabled={data.records.length === 0}
             >
               删除所有记录
+            </Button>
+            <Button
+              type="primary"
+              danger
+              disabled={selectedIds.length===0}
+              onClick={()=>handleBatchDelete(selectedIds)}
+            >
+              批量删除
             </Button>
           </Space>
         </div>
@@ -430,6 +465,50 @@ const AIHistory: React.FC = () => {
     );
   };
 
+  // ---------------- 组件渲染结束位置 ----------------
+  // 在返回 JSX 前添加分享弹窗
+
+  const ShareModal = (
+    <Modal
+      title="微信分享"
+      open={shareModalVisible}
+      onCancel={() => setShareModalVisible(false)}
+      footer={[
+        <Button key="close" onClick={() => setShareModalVisible(false)}>
+          关闭
+        </Button>,
+        <Button
+          key="copy"
+          type="primary"
+          onClick={() => {
+            if (shareData) {
+              navigator.clipboard.writeText(shareData.shareUrl);
+              message.success('链接已复制到剪贴板');
+            }
+          }}
+        >
+          复制链接
+        </Button>,
+      ]}
+    >
+      {shareData ? (
+        <div style={{ textAlign: 'center' }}>
+          <img
+            src={shareData.qrCodeUrl}
+            alt="分享二维码"
+            style={{ maxWidth: '100%', height: 'auto', marginBottom: 16 }}
+          />
+          <p>扫描二维码查看处理结果</p>
+          <p style={{ fontSize: '12px', color: 'rgba(0, 0, 0, 0.45)' }}>
+            链接有效期至: {new Date(shareData.expiresAt).toLocaleString()}
+          </p>
+        </div>
+      ) : (
+        <Empty description="暂无分享数据" />
+      )}
+    </Modal>
+  );
+
   return (
     <div className="fade-in-up">
       <Title level={2} style={{ marginBottom: '8px' }}>
@@ -452,6 +531,7 @@ const AIHistory: React.FC = () => {
           ))}
         </Tabs>
       </Card>
+      {ShareModal}
     </div>
   );
 };

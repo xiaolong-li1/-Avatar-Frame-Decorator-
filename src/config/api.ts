@@ -20,6 +20,7 @@ export const API_ENDPOINTS = {
     LOGOUT: '/auth/logout',
     REGISTER: '/auth/register',
     REFRESH: '/auth/refresh',
+    STATS: '/auth/stats',
   },
 
   // 文件上传
@@ -58,11 +59,7 @@ export const API_ENDPOINTS = {
     DELETE_ALL: '/ai/history/all',
   },
 
-  // 动态特效
-  EFFECTS: {
-    LIST: '/effects/list',
-    APPLY: '/effects/apply',
-  },
+
 
   // 版权保护
   COPYRIGHT: {
@@ -138,15 +135,7 @@ export interface ArtStyle {
   category: string
 }
 
-// 动态特效类型
-export interface Effect {
-  id: string
-  name: string
-  description: string
-  previewUrl: string
-  type: string
-  duration: number
-}
+
 
 // AI历史记录类型
 export interface AIHistoryRecord {

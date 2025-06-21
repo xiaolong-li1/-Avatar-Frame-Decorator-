@@ -44,7 +44,7 @@ exports.getFile = async (url) => {
     console.log('Extracted public_id:', publicId);
 
     // 添加重试逻辑
-    let retries = 5;
+    let retries = 10;
     let buffer;
     
     while (retries > 0) {
@@ -348,5 +348,28 @@ exports.cleanupFiles = async (options = {}) => {
   } catch (error) {
     console.error('❌ File cleanup failed:', error);
     throw new Error(`File cleanup failed: ${error.message}`);
+  }
+};
+
+// 保存图像文件 - 供水印功能使用
+exports.saveImage = async (imageBuffer, filename) => {
+  try {
+    if (!imageBuffer) {
+      throw new Error('图像数据为空');
+    }
+    
+    console.log(`💾 保存图像，文件名: ${filename}`);
+    
+    // 生成上传路径，存放在watermarked目录下
+    const path = `watermarked/${filename}`;
+    
+    // 使用现有的uploadFile方法上传文件
+    const url = await exports.uploadFile(imageBuffer, path, 'image/png');
+    
+    console.log(`✅ 图像保存成功: ${url}`);
+    return url;
+  } catch (error) {
+    console.error('❌ 保存图像失败:', error);
+    throw new Error(`保存图像失败: ${error.message}`);
   }
 };

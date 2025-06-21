@@ -3,6 +3,7 @@ import { Card, Row, Col, Button, Typography, message, Slider, Space, Spin, Modal
 import { CameraOutlined, DownloadOutlined, ShareAltOutlined, LoadingOutlined, HistoryOutlined } from '@ant-design/icons'
 import AvatarUpload from '../components/AvatarUpload'
 import { api, handleApiError } from '../services/api'
+import usePersistedState from '../hooks/usePersistedState'
 
 const { Title, Paragraph } = Typography
 
@@ -17,7 +18,7 @@ interface BlurResult {
 }
 
 const BackgroundBlur: React.FC = () => {
-  const [userAvatar, setUserAvatar] = useState<AvatarData | null>(null)
+  const [userAvatar, setUserAvatar] = usePersistedState<AvatarData | null>('background-blur-avatar', null)
   const [blurLevel, setBlurLevel] = useState(5)
   const [blurResult, setBlurResult] = useState<BlurResult | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)

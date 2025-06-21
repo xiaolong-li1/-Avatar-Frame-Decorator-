@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import usePersistedState from '../hooks/usePersistedState';
 import { Card, Row, Col, Button, Typography, Space, message, Divider, Slider, Select, Modal, Spin } from 'antd';
-import { DownloadOutlined, ShareAltOutlined, ZoomInOutlined, HistoryOutlined } from '@ant-design/icons';
+import { DownloadOutlined, ShareAltOutlined, ZoomInOutlined, HistoryOutlined, LoadingOutlined, BgColorsOutlined } from '@ant-design/icons';
 import AvatarUpload from '../components/AvatarUpload';
 import { api, handleApiError } from '../services/api';
+import { useAITask } from '../contexts/AITaskContext';
 
 const { Title, Paragraph } = Typography;
 const { Option } = Select;
@@ -18,9 +20,8 @@ interface SuperResResult {
 }
 
 const SuperResolution: React.FC = () => {
-  const [userAvatar, setUserAvatar] = useState<AvatarData | null>(null);
+  const [userAvatar, setUserAvatar] = usePersistedState<AvatarData | null>('super-resolution-avatar', null);
   const [superResResult, setSuperResResult] = useState<SuperResResult | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
   const [scaleFactor, setScaleFactor] = useState(2);
   const [quality, setQuality] = useState<string>('high');
   const [shareModalVisible, setShareModalVisible] = useState(false);
@@ -30,11 +31,28 @@ const SuperResolution: React.FC = () => {
     expiresAt: string;
   } | null>(null);
 
+  // 使用AI任务管理
+  const { startTask, getTasksByType, isTaskRunning } = useAITask();
+  const isProcessing = isTaskRunning('super-resolution');
+
   const handleAvatarChange = (data: AvatarData) => {
     setUserAvatar(data);
     setSuperResResult(null);
     message.info('头像已上传，点击"开始处理"进行超分辨增强');
   };
+
+  // 检查是否有已完成的超分辨率任务
+  useEffect(() => {
+    const tasks = getTasksByType('super-resolution');
+    const completedTask = tasks.find(task => task.status === 'completed');
+    
+    if (completedTask && completedTask.result?.resultUrl) {
+      setSuperResResult({
+        resultUrl: completedTask.result.resultUrl,
+        taskId: completedTask.id
+      });
+    }
+  }, [getTasksByType]);
 
   const applySuperResolution = async () => {
     if (!userAvatar || !userAvatar.fileId) {
@@ -42,30 +60,22 @@ const SuperResolution: React.FC = () => {
       return;
     }
 
-    setIsProcessing(true);
+    if (isProcessing) {
+      message.info('已有超分辨率任务正在处理中，请稍候...');
+      return;
+    }
+
     try {
-      console.log('开始超分辨处理:', {
+      const taskId = await startTask('super-resolution', {
         fileId: userAvatar.fileId,
         scaleFactor,
         quality
       });
 
-      const response = await api.superResolution(userAvatar.fileId, scaleFactor, quality);
-      
-      if (response.success && response.data.resultUrl) {
-        setSuperResResult({ 
-          resultUrl: response.data.resultUrl, 
-          taskId: response.data.taskId 
-        });
-        message.success('超分辨处理完成！图像质量已显著提升');
-      } else {
-        throw new Error(response.message || '超分辨处理失败');
-      }
+      console.log('超分辨率任务已启动:', taskId);
     } catch (error) {
-      console.error('超分辨处理失败:', error);
+      console.error('启动超分辨率任务失败:', error);
       handleApiError(error);
-    } finally {
-      setIsProcessing(false);
     }
   };
 
@@ -131,151 +141,103 @@ const SuperResolution: React.FC = () => {
       </Paragraph>
 
       <Row gutter={[24, 24]}>
-        <Col xs={24} lg={10}>
-          <Card title="上传头像" style={{ marginBottom: '16px' }}>
+        {/* 左侧：上传和参数设置 */}
+        <Col xs={24} lg={8}>
+          <Card title="上传头像" style={{ marginBottom: '24px' }}>
             {!userAvatar ? (
               <AvatarUpload onImageChange={handleAvatarChange} />
             ) : (
               <div style={{ textAlign: 'center' }}>
-                <div
-                  className="avatar-preview"
-                  style={{
-                    width: '240px',
-                    height: '240px',
-                    margin: '0 auto 16px',
-                    position: 'relative',
-                  }}
-                >
-                  <img
-                    src={superResResult?.resultUrl || userAvatar.url}
-                    alt="头像预览"
+                <div style={{
+                  width: '200px',
+                  height: '200px',
+                  margin: '0 auto 16px',
+                  border: '2px solid #e8e8e8',
+                  borderRadius: '8px',
+                  overflow: 'hidden',
+                  backgroundColor: '#fafafa',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <img 
+                    src={userAvatar.url} 
+                    alt="用户头像" 
                     style={{ 
-                      width: '100%', 
-                      height: '100%', 
-                      objectFit: 'cover',
-                      borderRadius: '8px'
+                      maxWidth: '100%', 
+                      maxHeight: '100%', 
+                      objectFit: 'cover'
                     }}
                   />
-
-                  {isProcessing && (
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        width: '100%',
-                        height: '100%',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        background: 'rgba(0,0,0,0.7)',
-                        borderRadius: '8px',
-                      }}
-                    >
-                      <Spin size="large" />
-                      <span style={{ color: '#fff', marginTop: '12px' }}>
-                        AI增强处理中...
-                      </span>
-                    </div>
-                  )}
                 </div>
-
-                <Space>
-                  <Button
-                    type="primary"
-                    icon={<ZoomInOutlined />}
-                    onClick={applySuperResolution}
-                    loading={isProcessing}
-                    disabled={isProcessing}
+                
+                <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                  <Button 
+                    type="text" 
+                    size="small"
+                    onClick={() => setUserAvatar(null)}
                   >
-                    开始处理
-                  </Button>
-                  <Button
-                    icon={<DownloadOutlined />}
-                    onClick={handleDownload}
-                    disabled={!superResResult?.resultUrl}
-                  >
-                    下载头像
-                  </Button>
-                  <Button
-                    icon={<ShareAltOutlined />}
-                    onClick={handleShare}
-                    disabled={!superResResult?.resultUrl}
-                  >
-                    分享到微信
+                    重新上传
                   </Button>
                 </Space>
 
                 <Divider />
-                <Button 
-                  type="link" 
-                  onClick={() => {
-                    setUserAvatar(null);
-                    setSuperResResult(null);
-                  }}
-                >
-                  重新上传
-                </Button>
+                
+                <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                  <Button
+                    type="primary"
+                    size="large"
+                    icon={isProcessing ? <LoadingOutlined /> : <BgColorsOutlined />}
+                    onClick={applySuperResolution}
+                    disabled={isProcessing}
+                    style={{ width: '100%' }}
+                  >
+                    {isProcessing ? '处理中...' : '开始超分辨处理'}
+                  </Button>
+                  
+                  {superResResult?.resultUrl && (
+                    <Space size="small" style={{ width: '100%' }}>
+                      <Button
+                        type="default"
+                        icon={<DownloadOutlined />}
+                        onClick={handleDownload}
+                        style={{ flex: 1 }}
+                      >
+                        下载
+                      </Button>
+                      <Button
+                        type="default"
+                        icon={<ShareAltOutlined />}
+                        onClick={handleShare}
+                        style={{ flex: 1 }}
+                      >
+                        分享
+                      </Button>
+                    </Space>
+                  )}
+                </Space>
               </div>
             )}
           </Card>
 
-          {/* 效果对比卡片 */}
-          {superResResult?.resultUrl && (
-            <Card title="效果对比">
-              <Row gutter={[8, 8]}>
-                <Col span={12}>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: '12px', marginBottom: '4px', color: '#666' }}>原图</div>
-                    <img 
-                      src={userAvatar?.url} 
-                      alt="原图" 
-                      style={{ 
-                        width: '100%', 
-                        height: '80px', 
-                        objectFit: 'cover',
-                        borderRadius: '4px'
-                      }}
-                    />
-                  </div>
-                </Col>
-                <Col span={12}>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: '12px', marginBottom: '4px', color: '#666' }}>
-                      超分辨({scaleFactor}x)
-                    </div>
-                    <img 
-                      src={superResResult.resultUrl} 
-                      alt="超分辨效果" 
-                      style={{ 
-                        width: '100%', 
-                        height: '80px', 
-                        objectFit: 'cover',
-                        borderRadius: '4px'
-                      }}
-                    />
-                  </div>
-                </Col>
-              </Row>
-            </Card>
-          )}
-        </Col>
-
-        <Col xs={24} lg={14}>
-          <Card title="处理参数设置">
-            {/* 添加历史记录按钮 */}
-            <div style={{ marginBottom: '16px', textAlign: 'right' }}>
-              <Button 
-                icon={<HistoryOutlined />} 
-                onClick={() => window.open('/ai-history', '_blank')}
-              >
-                查看历史记录
-              </Button>
-            </div>
-
+          {/* 参数设置卡片 */}
+          <Card title="处理参数" style={{ marginBottom: '24px' }}>
             <div style={{ marginBottom: '24px' }}>
-              <Title level={5}>放大倍数: {scaleFactor}x</Title>
+              <div style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center',
+                marginBottom: '12px'
+              }}>
+                <span style={{ fontWeight: 'bold' }}>放大倍数</span>
+                <span style={{ 
+                  color: '#1890ff', 
+                  fontWeight: 'bold',
+                  fontSize: '16px'
+                }}>
+                  {scaleFactor}x
+                </span>
+              </div>
               <Slider
                 min={1}
                 max={4}
@@ -290,40 +252,365 @@ const SuperResolution: React.FC = () => {
                 }}
                 disabled={isProcessing}
               />
-              <Paragraph type="secondary" style={{ fontSize: '12px', marginTop: '8px' }}>
-                选择图像放大倍数，倍数越高处理时间越长
-              </Paragraph>
             </div>
 
             <div style={{ marginBottom: '24px' }}>
-              <Title level={5}>处理质量</Title>
+              <div style={{ 
+                fontWeight: 'bold',
+                marginBottom: '12px'
+              }}>
+                处理质量
+              </div>
               <Select
                 value={quality}
                 onChange={setQuality}
                 style={{ width: '100%' }}
                 disabled={isProcessing}
+                size="large"
               >
-                <Option value="standard">标准质量 (快速)</Option>
-                <Option value="high">高质量 (推荐)</Option>
-                <Option value="ultra">超高质量 (较慢)</Option>
+                <Option value="standard">标准质量（快速）</Option>
+                <Option value="high">高质量（推荐）</Option>
+                <Option value="ultra">超高质量（较慢）</Option>
               </Select>
-              <Paragraph type="secondary" style={{ fontSize: '12px', marginTop: '8px' }}>
-                质量越高，处理效果越好，但耗时更长
-              </Paragraph>
             </div>
 
-            <Card size="small" style={{ backgroundColor: '#f8f9fa' }}>
-              <Title level={5} style={{ color: '#1890ff', marginBottom: '8px' }}>
+            {/* 使用提示 */}
+            <div style={{ 
+              padding: '12px',
+              backgroundColor: '#f8f9fa',
+              borderRadius: '6px',
+              border: '1px solid #e9ecef'
+            }}>
+              <div style={{ 
+                fontWeight: 'bold', 
+                color: '#1890ff', 
+                marginBottom: '8px',
+                fontSize: '14px'
+              }}>
                 💡 使用提示
-              </Title>
-              <ul style={{ fontSize: '13px', color: '#666', paddingLeft: '20px' }}>
-                <li>建议上传清晰度较好的原图，效果更佳</li>
-                <li>人像图片的超分辨效果通常最好</li>
-                <li>处理时间约30-60秒，请耐心等待</li>
-                <li>支持JPG、PNG等常见格式</li>
+              </div>
+              <ul style={{ 
+                margin: 0, 
+                paddingLeft: '16px',
+                fontSize: '12px',
+                color: '#666',
+                lineHeight: '1.5'
+              }}>
+                <li>建议上传清晰的正面头像照片</li>
+                <li>处理时间：1-3分钟（根据参数而定）</li>
+                <li>支持最大 4 倍分辨率提升</li>
               </ul>
-            </Card>
+            </div>
+
+            {/* 历史记录按钮 */}
+            <div style={{ marginTop: '16px', textAlign: 'center' }}>
+              <Button 
+                icon={<HistoryOutlined />} 
+                onClick={() => window.open('/ai-history', '_blank')}
+                style={{ width: '100%' }}
+              >
+                查看历史记录
+              </Button>
+            </div>
           </Card>
+        </Col>
+
+        {/* 右侧：效果展示 */}
+        <Col xs={24} lg={16}>
+          {superResResult?.resultUrl ? (
+            /* 有结果时显示对比效果 */
+            <Card 
+              title={
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <ZoomInOutlined style={{ color: '#1890ff' }} />
+                  <span>超分辨效果对比</span>
+                  <span style={{ 
+                    fontSize: '12px', 
+                    color: '#1890ff',
+                    backgroundColor: '#e6f7ff',
+                    padding: '2px 8px',
+                    borderRadius: '10px'
+                  }}>
+                    {scaleFactor}x 增强
+                  </span>
+                </div>
+              }
+            >
+              <Row gutter={[24, 24]} style={{ marginBottom: '24px' }}>
+                <Col xs={24} sm={12}>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ 
+                      fontSize: '16px', 
+                      fontWeight: 'bold',
+                      marginBottom: '12px', 
+                      color: '#666',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px'
+                    }}>
+                      <span>原图</span>
+                    </div>
+                    <div style={{
+                      width: '100%',
+                      height: '280px',
+                      border: '2px solid #e8e8e8',
+                      borderRadius: '8px',
+                      overflow: 'hidden',
+                      backgroundColor: '#fafafa',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      transition: 'all 0.3s ease'
+                    }}
+                    onClick={() => {
+                      Modal.info({
+                        title: '原图预览',
+                        width: '80%',
+                        style: { maxWidth: '800px' },
+                        content: (
+                          <div style={{ textAlign: 'center' }}>
+                            <img 
+                              src={userAvatar?.url} 
+                              alt="原图放大预览" 
+                              style={{ 
+                                maxWidth: '100%', 
+                                maxHeight: '70vh',
+                                objectFit: 'contain'
+                              }} 
+                            />
+                          </div>
+                        ),
+                        okText: '关闭'
+                      });
+                    }}
+                    >
+                      <img 
+                        src={userAvatar?.url} 
+                        alt="原图" 
+                        style={{ 
+                          maxWidth: '100%', 
+                          maxHeight: '100%', 
+                          objectFit: 'contain'
+                        }}
+                      />
+                    </div>
+                    <div style={{ 
+                      marginTop: '8px', 
+                      fontSize: '12px', 
+                      color: '#999' 
+                    }}>
+                      点击查看大图
+                    </div>
+                  </div>
+                </Col>
+                
+                <Col xs={24} sm={12}>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ 
+                      fontSize: '16px', 
+                      fontWeight: 'bold',
+                      marginBottom: '12px', 
+                      color: '#1890ff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px'
+                    }}>
+                      <ZoomInOutlined />
+                      <span>超分辨结果</span>
+                    </div>
+                    <div style={{
+                      width: '100%',
+                      height: '280px',
+                      border: '3px solid #1890ff',
+                      borderRadius: '8px',
+                      overflow: 'hidden',
+                      backgroundColor: '#fafafa',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      boxShadow: '0 4px 16px rgba(24, 144, 255, 0.15)',
+                      transition: 'all 0.3s ease'
+                    }}
+                    onClick={() => {
+                      Modal.info({
+                        title: `超分辨效果预览 (${scaleFactor}x)`,
+                        width: '80%',
+                        style: { maxWidth: '800px' },
+                        content: (
+                          <div style={{ textAlign: 'center' }}>
+                            <img 
+                              src={superResResult.resultUrl} 
+                              alt="超分辨放大预览" 
+                              style={{ 
+                                maxWidth: '100%', 
+                                maxHeight: '70vh',
+                                objectFit: 'contain'
+                              }} 
+                            />
+                            <div style={{ 
+                              marginTop: '12px', 
+                              fontSize: '14px', 
+                              color: '#1890ff' 
+                            }}>
+                              分辨率提升 {scaleFactor}x • 质量：{quality === 'standard' ? '标准' : quality === 'high' ? '高质量' : '超高质量'}
+                            </div>
+                          </div>
+                        ),
+                        okText: '关闭'
+                      });
+                    }}
+                    >
+                      <img 
+                        src={superResResult.resultUrl} 
+                        alt="超分辨效果" 
+                        style={{ 
+                          maxWidth: '100%', 
+                          maxHeight: '100%', 
+                          objectFit: 'contain'
+                        }}
+                      />
+                    </div>
+                    <div style={{ 
+                      marginTop: '8px', 
+                      fontSize: '12px', 
+                      color: '#1890ff',
+                      fontWeight: 'bold'
+                    }}>
+                      点击查看大图 • 分辨率提升{scaleFactor}倍
+                    </div>
+                  </div>
+                </Col>
+              </Row>
+              
+              {/* 质量提升指标 */}
+              <Row gutter={[16, 16]}>
+                <Col span={8}>
+                  <div style={{ 
+                    textAlign: 'center',
+                    padding: '16px',
+                    backgroundColor: '#f6ffed',
+                    border: '1px solid #b7eb8f',
+                    borderRadius: '6px'
+                  }}>
+                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#52c41a' }}>
+                      {scaleFactor}x
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                      分辨率提升
+                    </div>
+                  </div>
+                </Col>
+                <Col span={8}>
+                  <div style={{ 
+                    textAlign: 'center',
+                    padding: '16px',
+                    backgroundColor: '#e6f7ff',
+                    border: '1px solid #91d5ff',
+                    borderRadius: '6px'
+                  }}>
+                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1890ff' }}>
+                      {quality === 'standard' ? '标准' : quality === 'high' ? '高' : '超高'}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                      处理质量
+                    </div>
+                  </div>
+                </Col>
+                <Col span={8}>
+                  <div style={{ 
+                    textAlign: 'center',
+                    padding: '16px',
+                    backgroundColor: '#fff2e8',
+                    border: '1px solid #ffbb96',
+                    borderRadius: '6px'
+                  }}>
+                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#fa541c' }}>
+                      AI
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                      智能增强
+                    </div>
+                  </div>
+                </Col>
+              </Row>
+            </Card>
+          ) : (
+            /* 无结果时显示引导界面 */
+            <Card>
+              <div style={{ 
+                textAlign: 'center', 
+                padding: '60px 20px',
+                color: '#999'
+              }}>
+                <ZoomInOutlined style={{ fontSize: '64px', marginBottom: '24px' }} />
+                <Title level={4} type="secondary">
+                  AI超分辨增强预览
+                </Title>
+                <Paragraph type="secondary">
+                  上传头像并设置参数后，这里将显示超分辨效果对比
+                </Paragraph>
+                
+                {/* 功能特点展示 */}
+                <Row gutter={[16, 16]} style={{ marginTop: '40px' }}>
+                  <Col span={8}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ 
+                        fontSize: '32px', 
+                        marginBottom: '8px',
+                        color: '#52c41a'
+                      }}>
+                        🔍
+                      </div>
+                      <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>
+                        细节增强
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#999' }}>
+                        AI智能识别并增强图像细节
+                      </div>
+                    </div>
+                  </Col>
+                  <Col span={8}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ 
+                        fontSize: '32px', 
+                        marginBottom: '8px',
+                        color: '#1890ff'
+                      }}>
+                        ⚡
+                      </div>
+                      <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>
+                        快速处理
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#999' }}>
+                        1-3分钟完成超分辨处理
+                      </div>
+                    </div>
+                  </Col>
+                  <Col span={8}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ 
+                        fontSize: '32px', 
+                        marginBottom: '8px',
+                        color: '#fa541c'
+                      }}>
+                        🎯
+                      </div>
+                      <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>
+                        高质量
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#999' }}>
+                        最高支持4倍分辨率提升
+                      </div>
+                    </div>
+                  </Col>
+                </Row>
+              </div>
+            </Card>
+          )}
         </Col>
       </Row>
 
@@ -359,7 +646,7 @@ const SuperResolution: React.FC = () => {
             />
             <p>扫描二维码查看您的超分辨头像</p>
             <p style={{ fontSize: '12px', color: 'rgba(0, 0, 0, 0.45)' }}>
-              链接有效期至: {new Date(shareData.expiresAt).toLocaleString()}
+              链接有效期至: {shareData.expiresAt}
             </p>
           </div>
         )}

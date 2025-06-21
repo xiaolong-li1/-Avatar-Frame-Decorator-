@@ -30,10 +30,10 @@ router.get('/background-blur/history', aiController.getBackgroundBlurHistory);
 router.get('/background-replace/history', aiController.getBackgroundReplaceHistory);
 router.get('/text-to-image/history', aiController.getTextToImageHistory);
 
-// 删除记录接口
-router.delete('/history/:recordId', aiController.deleteAIRecord);
-router.delete('/history/batch', aiController.deleteMultipleAIRecords);
+// 删除记录接口（先声明精确路径，后声明参数路径）
 router.delete('/history/all', aiController.deleteAllAIRecords);
+router.delete('/history/batch', aiController.deleteMultipleAIRecords);
+router.delete('/history/:recordId', aiController.deleteAIRecord);
 
 // 调试路由
 router.get('/test', (req, res) => {
